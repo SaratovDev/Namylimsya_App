@@ -1,0 +1,36 @@
+# Node
+node_modules/
+.next/
+out/
+dist/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Go
+api/bin/
+api/tmp/
+*.exe
+*.test
+*.out
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Storage (local driver)
+api/storage/
+storage/
+
+# Docker
+infra/data/

@@ -1,0 +1,16 @@
+{
+  "name": "namylimsya-app",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "infra:up": "docker compose -f infra/docker-compose.yml up -d",
+    "infra:down": "docker compose -f infra/docker-compose.yml down",
+    "infra:logs": "docker compose -f infra/docker-compose.yml logs -f",
+    "dev:web": "pnpm --dir web dev",
+    "dev:api": "cd api && air",
+    "dev": "echo 'Run infra:up, then dev:api and dev:web in two terminals'"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

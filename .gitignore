@@ -34,3 +34,11 @@ storage/
 
 # Docker
 infra/data/
+
+bin/
+tmp/
+storage/
+*.exe
+*.test
+*.out
+.env

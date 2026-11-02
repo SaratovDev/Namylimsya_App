@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  api:
+    name: API (Go)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: namylimsya
+          POSTGRES_PASSWORD: devpass
+          POSTGRES_DB: namylimsya
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U namylimsya"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      APP_ENV: test
+      HTTP_PORT: "8080"
+      DATABASE_URL: postgres://namylimsya:devpass@localhost:5432/namylimsya?sslmode=disable
+      REDIS_URL: redis://localhost:6379/0
+      JWT_ACCESS_SECRET: test_access
+      JWT_REFRESH_SECRET: test_refresh
+      EMAIL_VERIFICATION_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: api/go.sum
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test ./... -count=1
+
+  web:
+    name: Web (Next.js)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm build

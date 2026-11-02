@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 async function getHealth() {
   const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080/api/v1";
   try {
@@ -8,6 +10,8 @@ async function getHealth() {
     return { status: "unreachable", db: "unknown", redis: "unknown" };
   }
 }
+
+
 
 export default async function Home() {
   const health = await getHealth();

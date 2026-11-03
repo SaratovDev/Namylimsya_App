@@ -75,6 +75,8 @@ func main() {
 	// User service & handler
 	userSvc := services.NewUserService(queries, localStorage)
 	userHandler := handlers.NewUserHandler(userSvc)
+	eventSvc := services.NewEventService(queries)
+	eventHandler := handlers.NewEventHandler(eventSvc)
 
 	// --- Роутер ---
 	health := &handlers.HealthHandler{DB: pgPool, Redis: rdb}
@@ -82,6 +84,7 @@ func main() {
 		Health: health,
 		Auth:   authHandler,
 		User:   userHandler,
+		Event:  eventHandler,
 		TM:     tm,
 	})
 

@@ -14,6 +14,7 @@ type Deps struct {
 	Health *handlers.HealthHandler
 	Auth   *handlers.AuthHandler
 	User   *handlers.UserHandler
+	Event  *handlers.EventHandler
 	TM     *auth.TokenManager
 }
 
@@ -37,6 +38,9 @@ func New(deps Deps) chi.Router {
 
 	r.Route("/api/v1", func(api chi.Router) {
 		api.Get("/health", deps.Health.Get)
+		api.Get("/events", deps.Event.GetFeed)      // публичный
+		api.Get("/events/{id}", deps.Event.GetByID) // публичный
+		api.Get("/users/{id}", deps.User.GetPublic) // публичный
 
 		api.Route("/auth", func(r chi.Router) {
 			r.Post("/register", deps.Auth.Register)
@@ -51,6 +55,8 @@ func New(deps Deps) chi.Router {
 			r.Get("/users/me", deps.Auth.Me)
 			r.Patch("/users/me", deps.User.UpdateMe)
 			r.Post("/users/me/avatar", deps.User.UploadAvatar)
+			r.Post("/events", deps.Event.Create)
+			r.Post("/events/{id}/cancel", deps.Event.Cancel)
 		})
 
 		// Публичные роуты

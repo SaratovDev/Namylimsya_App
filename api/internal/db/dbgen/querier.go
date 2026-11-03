@@ -11,7 +11,13 @@ import (
 )
 
 type Querier interface {
+	CancelEvent(ctx context.Context, arg CancelEventParams) (Event, error)
+	CountActiveEventsByOrganizer(ctx context.Context, organizerID uuid.UUID) (int64, error)
+	CreateEvent(ctx context.Context, arg CreateEventParams) (Event, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	GetEventByID(ctx context.Context, id uuid.UUID) (Event, error)
+	GetEventsArchive(ctx context.Context, arg GetEventsArchiveParams) ([]GetEventsArchiveRow, error)
+	GetEventsFeed(ctx context.Context, arg GetEventsFeedParams) ([]GetEventsFeedRow, error)
 	GetPublicUser(ctx context.Context, id uuid.UUID) (GetPublicUserRow, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)

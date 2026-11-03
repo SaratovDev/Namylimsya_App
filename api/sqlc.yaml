@@ -21,3 +21,33 @@ sql:
             go_type:
               type: "string"
               pointer: true
+              
+          - db_type: "uuid"
+            go_type: "github.com/google/uuid.UUID"
+          - db_type: "timestamptz"
+            go_type: "time.Time"
+          - db_type: "text"
+            nullable: true
+            go_type:
+              type: "string"
+              pointer: true
+
+          # --- JSONB ---
+          - db_type: "jsonb"
+            go_type:
+              import: "encoding/json"
+              type: "RawMessage"
+          - db_type: "jsonb"
+            nullable: true
+            go_type:
+              import: "encoding/json"
+              type: "RawMessage"
+              pointer: true
+
+          # --- TEXT[] (массив) ---
+          - db_type: "pg_catalog.text[]"
+            go_type: "[]string"
+          - db_type: "pg_catalog.text[]"
+            nullable: true
+            go_type: "[]string"              
+              

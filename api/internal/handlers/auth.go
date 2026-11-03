@@ -113,3 +113,43 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 
 	httpx.JSON(w, http.StatusOK, user)
 }
+
+func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie("refresh_token")
+	if err != nil {
+		httpx.Error(w, http.StatusUnauthorized, "unauthorized", "no refresh token")
+		return
+	}
+
+	accessToken, newRefresh, err := h.svc.Refresh(r.Context(), cookie.Value)
+	if err != nil {
+		httpx.Error(w, http.StatusUnauthorized, "unauthorized", "invalid refresh token")
+		return
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "refresh_token",
+		Value:    newRefresh,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   false,
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	httpx.OK(w, map[string]string{"access_token": accessToken})
+}
+
+func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie("refresh_token")
+	if err == nil {
+		_ = h.svc.Logout(r.Context(), cookie.Value)
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     "refresh_token",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		MaxAge:   -1,
+	})
+	w.WriteHeader(http.StatusNoContent)
+}

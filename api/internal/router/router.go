@@ -1,8 +1,6 @@
 package router
 
 import (
-	"net/http"
-
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
@@ -15,10 +13,11 @@ import (
 type Deps struct {
 	Health *handlers.HealthHandler
 	Auth   *handlers.AuthHandler
+	User   *handlers.UserHandler
 	TM     *auth.TokenManager
 }
 
-func New(deps Deps) http.Handler {
+func New(deps Deps) chi.Router {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
@@ -42,15 +41,21 @@ func New(deps Deps) http.Handler {
 		api.Route("/auth", func(r chi.Router) {
 			r.Post("/register", deps.Auth.Register)
 			r.Post("/login", deps.Auth.Login)
-			// api.Post("/refresh", deps.Auth.Refresh) // Пока пропустим
-			// api.Post("/logout", deps.Auth.Logout)   // Пока пропустим
+			r.Post("/refresh", deps.Auth.Refresh)
+			r.Post("/logout", deps.Auth.Logout)
 		})
 
 		// Защищённые роуты
 		api.Group(func(r chi.Router) {
 			r.Use(custommw.AuthRequired(deps.TM))
 			r.Get("/users/me", deps.Auth.Me)
+			r.Patch("/users/me", deps.User.UpdateMe)
+			r.Post("/users/me/avatar", deps.User.UploadAvatar)
 		})
+
+		// Публичные роуты
+		api.Get("/users/{id}", deps.User.GetPublic)
+
 	})
 
 	return r

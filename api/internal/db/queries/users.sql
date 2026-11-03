@@ -14,11 +14,14 @@ SELECT * FROM users WHERE id = $1;
 -- name: UpdateUser :one
 UPDATE users
 SET
-    username   = COALESCE(NULLIF($2::text, ''), username),
-    city       = COALESCE(NULLIF($3::text, ''), city),
-    bio        = COALESCE($4::text, bio),
-    hobbies    = COALESCE($5::text[], hobbies),
-    show_age   = COALESCE($6::boolean, show_age),
+    username = $2, gender = $3, birth_date = $4, city = $5, bio = $6,
+    hobbies = $7, telegram = $8, vk = $9, avatar_url = $10, show_age = $11,
     updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: GetPublicUser :one
+SELECT 
+    id, username, gender, birth_date, show_age, city, bio, hobbies, avatar_url,
+    created_at, updated_at
+FROM users WHERE id = $1;

@@ -7,6 +7,7 @@ package dbgen
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -57,6 +58,46 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.IsBanned,
 		&i.BanReason,
 		&i.EmailVerified,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getPublicUser = `-- name: GetPublicUser :one
+SELECT 
+    id, username, gender, birth_date, show_age, city, bio, hobbies, avatar_url,
+    created_at, updated_at
+FROM users WHERE id = $1
+`
+
+type GetPublicUserRow struct {
+	ID        uuid.UUID   `json:"id"`
+	Username  string      `json:"username"`
+	Gender    *string     `json:"gender"`
+	BirthDate pgtype.Date `json:"birth_date"`
+	ShowAge   bool        `json:"show_age"`
+	City      *string     `json:"city"`
+	Bio       *string     `json:"bio"`
+	Hobbies   []string    `json:"hobbies"`
+	AvatarUrl *string     `json:"avatar_url"`
+	CreatedAt time.Time   `json:"created_at"`
+	UpdatedAt time.Time   `json:"updated_at"`
+}
+
+func (q *Queries) GetPublicUser(ctx context.Context, id uuid.UUID) (GetPublicUserRow, error) {
+	row := q.db.QueryRow(ctx, getPublicUser, id)
+	var i GetPublicUserRow
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.Gender,
+		&i.BirthDate,
+		&i.ShowAge,
+		&i.City,
+		&i.Bio,
+		&i.Hobbies,
+		&i.AvatarUrl,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -128,33 +169,40 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 const updateUser = `-- name: UpdateUser :one
 UPDATE users
 SET
-    username   = COALESCE(NULLIF($2::text, ''), username),
-    city       = COALESCE(NULLIF($3::text, ''), city),
-    bio        = COALESCE($4::text, bio),
-    hobbies    = COALESCE($5::text[], hobbies),
-    show_age   = COALESCE($6::boolean, show_age),
+    username = $2, gender = $3, birth_date = $4, city = $5, bio = $6,
+    hobbies = $7, telegram = $8, vk = $9, avatar_url = $10, show_age = $11,
     updated_at = now()
 WHERE id = $1
 RETURNING id, email, password_hash, username, gender, birth_date, show_age, city, bio, hobbies, telegram, vk, avatar_url, role, is_banned, ban_reason, email_verified, created_at, updated_at
 `
 
 type UpdateUserParams struct {
-	ID      uuid.UUID `json:"id"`
-	Column2 string    `json:"column_2"`
-	Column3 string    `json:"column_3"`
-	Column4 string    `json:"column_4"`
-	Column5 []string  `json:"column_5"`
-	Column6 bool      `json:"column_6"`
+	ID        uuid.UUID   `json:"id"`
+	Username  string      `json:"username"`
+	Gender    *string     `json:"gender"`
+	BirthDate pgtype.Date `json:"birth_date"`
+	City      *string     `json:"city"`
+	Bio       *string     `json:"bio"`
+	Hobbies   []string    `json:"hobbies"`
+	Telegram  *string     `json:"telegram"`
+	Vk        *string     `json:"vk"`
+	AvatarUrl *string     `json:"avatar_url"`
+	ShowAge   bool        `json:"show_age"`
 }
 
 func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error) {
 	row := q.db.QueryRow(ctx, updateUser,
 		arg.ID,
-		arg.Column2,
-		arg.Column3,
-		arg.Column4,
-		arg.Column5,
-		arg.Column6,
+		arg.Username,
+		arg.Gender,
+		arg.BirthDate,
+		arg.City,
+		arg.Bio,
+		arg.Hobbies,
+		arg.Telegram,
+		arg.Vk,
+		arg.AvatarUrl,
+		arg.ShowAge,
 	)
 	var i User
 	err := row.Scan(

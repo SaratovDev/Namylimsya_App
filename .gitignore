@@ -42,3 +42,9 @@ storage/
 *.test
 *.out
 .env
+
+cookies.txt
+api/storage/
+*.jpg
+*.jpeg
+*.png

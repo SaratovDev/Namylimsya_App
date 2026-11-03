@@ -20,6 +20,7 @@ import (
 	"github.com/SaratovDev/Namylimsya_App/api/internal/handlers"
 	"github.com/SaratovDev/Namylimsya_App/api/internal/router"
 	"github.com/SaratovDev/Namylimsya_App/api/internal/services"
+	"github.com/SaratovDev/Namylimsya_App/api/internal/storage"
 )
 
 func main() {
@@ -62,13 +63,30 @@ func main() {
 	authSvc := services.NewAuthService(queries, tm, sm)
 	authHandler := handlers.NewAuthHandler(authSvc)
 
+	// Storage
+	localStorage, err := storage.NewLocalStorage(
+		cfg.Storage.LocalPath,
+		"http://localhost:"+cfg.HTTPPort+"/static",
+	)
+	if err != nil {
+		log.Fatal().Err(err).Msg("init storage")
+	}
+
+	// User service & handler
+	userSvc := services.NewUserService(queries, localStorage)
+	userHandler := handlers.NewUserHandler(userSvc)
+
 	// --- Роутер ---
 	health := &handlers.HealthHandler{DB: pgPool, Redis: rdb}
 	r := router.New(router.Deps{
 		Health: health,
 		Auth:   authHandler,
+		User:   userHandler,
 		TM:     tm,
 	})
+
+	// Раздача загруженных файлов
+	r.Mount("/static", http.StripPrefix("/static", http.FileServer(http.Dir(cfg.Storage.LocalPath))))
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTPPort,

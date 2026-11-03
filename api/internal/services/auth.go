@@ -120,3 +120,51 @@ func (s *AuthService) GetUserByID(ctx context.Context, id uuid.UUID) (*dbgen.Use
 	}
 	return &user, nil
 }
+
+func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (string, string, error) {
+	claims, err := s.tm.ParseRefreshToken(refreshToken)
+	if err != nil {
+		return "", "", err
+	}
+
+	// Проверяем в Redis
+	valid, err := s.sm.IsRefreshTokenValid(ctx, claims.UserID, claims.ID)
+	if err != nil || !valid {
+		return "", "", errors.New("refresh token revoked")
+	}
+
+	// Отзываем старый (ротация)
+	_ = s.sm.RevokeRefreshToken(ctx, claims.UserID, claims.ID)
+
+	// Получаем юзера для роли
+	user, err := s.db.GetUserByID(ctx, claims.UserID)
+	if err != nil {
+		return "", "", err
+	}
+
+	newAccess, err := s.tm.GenerateAccessToken(user.ID, user.Role)
+	if err != nil {
+		return "", "", err
+	}
+	newRefresh, err := s.tm.GenerateRefreshToken(user.ID)
+	if err != nil {
+		return "", "", err
+	}
+
+	// Сохраняем новый refresh в Redis
+	newClaims, _ := s.tm.ParseRefreshToken(newRefresh)
+	ttl := s.tm.GetRefreshTTL()
+	if err := s.sm.SaveRefreshToken(ctx, user.ID, newClaims.ID, ttl); err != nil {
+		return "", "", err
+	}
+
+	return newAccess, newRefresh, nil
+}
+
+func (s *AuthService) Logout(ctx context.Context, refreshToken string) error {
+	claims, err := s.tm.ParseRefreshToken(refreshToken)
+	if err != nil {
+		return err
+	}
+	return s.sm.RevokeRefreshToken(ctx, claims.UserID, claims.ID)
+}

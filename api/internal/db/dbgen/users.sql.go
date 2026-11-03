@@ -128,34 +128,34 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 
 const updateUser = `-- name: UpdateUser :one
 UPDATE users
-SET 
-    username = COALESCE($2, username),
-    city = COALESCE($3, city),
-    bio = COALESCE($4, bio),
-    hobbies = COALESCE($5, hobbies),
-    show_age = COALESCE($6, show_age),
+SET
+    username   = COALESCE(NULLIF($2::text, ''), username),
+    city       = COALESCE(NULLIF($3::text, ''), city),
+    bio        = COALESCE($4::text, bio),
+    hobbies    = COALESCE($5::text[], hobbies),
+    show_age   = COALESCE($6::boolean, show_age),
     updated_at = now()
 WHERE id = $1
 RETURNING id, email, password_hash, username, gender, birth_date, show_age, city, bio, hobbies, telegram, vk, avatar_url, role, is_banned, ban_reason, email_verified, created_at, updated_at
 `
 
 type UpdateUserParams struct {
-	ID       uuid.UUID    `json:"id"`
-	Username *string      `json:"username"`
-	City     *string      `json:"city"`
-	Bio      *string      `json:"bio"`
-	Hobbies  []string     `json:"hobbies"`
-	ShowAge  sql.NullBool `json:"show_age"`
+	ID      uuid.UUID `json:"id"`
+	Column2 string    `json:"column_2"`
+	Column3 string    `json:"column_3"`
+	Column4 string    `json:"column_4"`
+	Column5 []string  `json:"column_5"`
+	Column6 bool      `json:"column_6"`
 }
 
 func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error) {
 	row := q.db.QueryRowContext(ctx, updateUser,
 		arg.ID,
-		arg.Username,
-		arg.City,
-		arg.Bio,
-		pq.Array(arg.Hobbies),
-		arg.ShowAge,
+		arg.Column2,
+		arg.Column3,
+		arg.Column4,
+		pq.Array(arg.Column5),
+		arg.Column6,
 	)
 	var i User
 	err := row.Scan(

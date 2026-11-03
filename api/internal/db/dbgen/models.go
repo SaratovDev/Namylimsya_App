@@ -6,10 +6,10 @@ package dbgen
 
 import (
 	"database/sql"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/sqlc-dev/pqtype"
 )
 
 type Application struct {
@@ -23,13 +23,13 @@ type Application struct {
 }
 
 type ChatMessage struct {
-	ID        uuid.UUID     `json:"id"`
-	EventID   uuid.UUID     `json:"event_id"`
-	UserID    uuid.UUID     `json:"user_id"`
-	Text      string        `json:"text"`
-	ReplyToID uuid.NullUUID `json:"reply_to_id"`
-	CreatedAt time.Time     `json:"created_at"`
-	DeletedAt sql.NullTime  `json:"deleted_at"`
+	ID        uuid.UUID  `json:"id"`
+	EventID   uuid.UUID  `json:"event_id"`
+	UserID    uuid.UUID  `json:"user_id"`
+	Text      string     `json:"text"`
+	ReplyToID *uuid.UUID `json:"reply_to_id"`
+	CreatedAt time.Time  `json:"created_at"`
+	DeletedAt *time.Time `json:"deleted_at"`
 }
 
 type Complaint struct {
@@ -63,22 +63,22 @@ type Event struct {
 }
 
 type Notification struct {
-	ID        uuid.UUID             `json:"id"`
-	UserID    uuid.UUID             `json:"user_id"`
-	Type      string                `json:"type"`
-	Payload   pqtype.NullRawMessage `json:"payload"`
-	IsRead    bool                  `json:"is_read"`
-	CreatedAt time.Time             `json:"created_at"`
+	ID        uuid.UUID        `json:"id"`
+	UserID    uuid.UUID        `json:"user_id"`
+	Type      string           `json:"type"`
+	Payload   *json.RawMessage `json:"payload"`
+	IsRead    bool             `json:"is_read"`
+	CreatedAt time.Time        `json:"created_at"`
 }
 
 type SupportTicket struct {
-	ID        uuid.UUID     `json:"id"`
-	UserID    uuid.NullUUID `json:"user_id"`
-	Type      string        `json:"type"`
-	Subject   string        `json:"subject"`
-	Message   string        `json:"message"`
-	Status    string        `json:"status"`
-	CreatedAt time.Time     `json:"created_at"`
+	ID        uuid.UUID  `json:"id"`
+	UserID    *uuid.UUID `json:"user_id"`
+	Type      string     `json:"type"`
+	Subject   string     `json:"subject"`
+	Message   string     `json:"message"`
+	Status    string     `json:"status"`
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 type User struct {

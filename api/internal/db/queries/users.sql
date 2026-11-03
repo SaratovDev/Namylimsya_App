@@ -13,12 +13,12 @@ SELECT * FROM users WHERE id = $1;
 
 -- name: UpdateUser :one
 UPDATE users
-SET 
-    username = COALESCE(sqlc.narg('username'), username),
-    city = COALESCE(sqlc.narg('city'), city),
-    bio = COALESCE(sqlc.narg('bio'), bio),
-    hobbies = COALESCE(sqlc.narg('hobbies'), hobbies),
-    show_age = COALESCE(sqlc.narg('show_age'), show_age),
+SET
+    username   = COALESCE(NULLIF($2::text, ''), username),
+    city       = COALESCE(NULLIF($3::text, ''), city),
+    bio        = COALESCE($4::text, bio),
+    hobbies    = COALESCE($5::text[], hobbies),
+    show_age   = COALESCE($6::boolean, show_age),
     updated_at = now()
 WHERE id = $1
 RETURNING *;

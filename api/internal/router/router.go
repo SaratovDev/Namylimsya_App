@@ -17,6 +17,8 @@ type Deps struct {
 	Event       *handlers.EventHandler
 	TM          *auth.TokenManager
 	Application *handlers.ApplicationHandler
+	Chat        *handlers.ChatHandler
+	WS          *handlers.WSHandler
 }
 
 func New(deps Deps) chi.Router {
@@ -65,8 +67,15 @@ func New(deps Deps) chi.Router {
 			r.Patch("/applications/{id}/approve", deps.Application.Approve)
 			r.Patch("/applications/{id}/reject", deps.Application.Reject)
 			r.Post("/applications/{id}/cancel", deps.Application.Cancel)
+
+			r.Get("/events/{id}/messages", deps.Chat.History)
+			r.Post("/events/{id}/messages", deps.Chat.SendHTTP)
+			r.Post("/events/{id}/messages/read", deps.Chat.MarkRead)
 		})
 	})
+
+	// WS — вне /api/v1, без AuthRequired (авторизация внутри через ?token=)
+	r.Get("/ws/events/{id}", deps.WS.Handle)
 
 	return r
 }

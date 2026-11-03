@@ -17,9 +17,11 @@ import (
 	"github.com/SaratovDev/Namylimsya_App/api/internal/db"
 	"github.com/SaratovDev/Namylimsya_App/api/internal/db/dbgen"
 	"github.com/SaratovDev/Namylimsya_App/api/internal/handlers"
+	"github.com/SaratovDev/Namylimsya_App/api/internal/ratelimit"
 	"github.com/SaratovDev/Namylimsya_App/api/internal/router"
 	"github.com/SaratovDev/Namylimsya_App/api/internal/services"
 	"github.com/SaratovDev/Namylimsya_App/api/internal/storage"
+	"github.com/SaratovDev/Namylimsya_App/api/internal/ws"
 	"github.com/stretchr/testify/require"
 )
 
@@ -85,7 +87,11 @@ func newTestEnv(t *testing.T) *testEnv {
 	health := &handlers.HealthHandler{DB: pgPool, Redis: rdb}
 	authSvc := services.NewAuthService(queries, tm, sm)
 	authHandler := handlers.NewAuthHandler(authSvc)
-
+	hub := ws.NewHub()
+	chatSvc := services.NewChatService(queries)
+	chatHandler := handlers.NewChatHandler(chatSvc, hub) // ← hub, не nil
+	rl := ratelimit.New(rdb)
+	wsHandler := handlers.NewWSHandler(hub, chatSvc, tm, rl)
 	userSvc := services.NewUserService(queries, localStorage)
 	userHandler := handlers.NewUserHandler(userSvc)
 
@@ -100,6 +106,8 @@ func newTestEnv(t *testing.T) *testEnv {
 		User:        userHandler,
 		Event:       eventHandler,
 		Application: appHandler,
+		Chat:        chatHandler,
+		WS:          wsHandler,
 		TM:          tm,
 	})
 

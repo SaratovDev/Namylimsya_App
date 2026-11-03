@@ -32,6 +32,12 @@ type ChatMessage struct {
 	DeletedAt *time.Time `json:"deleted_at"`
 }
 
+type ChatRead struct {
+	UserID     uuid.UUID `json:"user_id"`
+	EventID    uuid.UUID `json:"event_id"`
+	LastReadAt time.Time `json:"last_read_at"`
+}
+
 type Complaint struct {
 	ID         uuid.UUID `json:"id"`
 	ReporterID uuid.UUID `json:"reporter_id"`

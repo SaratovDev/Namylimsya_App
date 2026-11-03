@@ -18,9 +18,11 @@ import (
 	"github.com/SaratovDev/Namylimsya_App/api/internal/db"
 	"github.com/SaratovDev/Namylimsya_App/api/internal/db/dbgen"
 	"github.com/SaratovDev/Namylimsya_App/api/internal/handlers"
+	"github.com/SaratovDev/Namylimsya_App/api/internal/ratelimit"
 	"github.com/SaratovDev/Namylimsya_App/api/internal/router"
 	"github.com/SaratovDev/Namylimsya_App/api/internal/services"
 	"github.com/SaratovDev/Namylimsya_App/api/internal/storage"
+	"github.com/SaratovDev/Namylimsya_App/api/internal/ws"
 )
 
 func main() {
@@ -72,6 +74,12 @@ func main() {
 		log.Fatal().Err(err).Msg("init storage")
 	}
 
+	hub := ws.NewHub()
+	chatSvc := services.NewChatService(queries)
+	chatHandler := handlers.NewChatHandler(chatSvc, hub)
+	rl := ratelimit.New(rdb)
+	wsHandler := handlers.NewWSHandler(hub, chatSvc, tm, rl)
+
 	// User service & handler
 	userSvc := services.NewUserService(queries, localStorage)
 	userHandler := handlers.NewUserHandler(userSvc)
@@ -89,6 +97,8 @@ func main() {
 		Event:       eventHandler,
 		Application: appHandler,
 		TM:          tm,
+		Chat:        chatHandler,
+		WS:          wsHandler,
 	})
 
 	// Раздача загруженных файлов
@@ -117,4 +127,5 @@ func main() {
 		log.Error().Err(err).Msg("shutdown")
 	}
 	log.Info().Msg("server stopped")
+
 }

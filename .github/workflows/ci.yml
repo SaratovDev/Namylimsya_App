@@ -46,6 +46,13 @@ jobs:
       - run: go vet ./...
       - run: go build ./...
       - run: go test ./... -count=1
+        env:
+          INTEGRATION: "1"
+          JWT_ACCESS_SECRET: test_access
+          JWT_REFRESH_SECRET: test_refresh
+          STORAGE_LOCAL_PATH: ./storage
+          HTTP_PORT: "8080"
+          EMAIL_VERIFICATION_ENABLED: "false"
 
   web:
     name: Web (Next.js)

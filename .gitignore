@@ -36,7 +36,7 @@ infra/data/
 
 bin/
 tmp/
-
+/storage/
 *.exe
 *.test
 *.out

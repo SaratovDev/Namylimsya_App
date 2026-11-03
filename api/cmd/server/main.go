@@ -75,17 +75,20 @@ func main() {
 	// User service & handler
 	userSvc := services.NewUserService(queries, localStorage)
 	userHandler := handlers.NewUserHandler(userSvc)
+	appSvc := services.NewApplicationService(queries)
+	appHandler := handlers.NewApplicationHandler(appSvc)
 	eventSvc := services.NewEventService(queries)
-	eventHandler := handlers.NewEventHandler(eventSvc)
+	eventHandler := handlers.NewEventHandler(eventSvc, appSvc)
 
 	// --- Роутер ---
 	health := &handlers.HealthHandler{DB: pgPool, Redis: rdb}
 	r := router.New(router.Deps{
-		Health: health,
-		Auth:   authHandler,
-		User:   userHandler,
-		Event:  eventHandler,
-		TM:     tm,
+		Health:      health,
+		Auth:        authHandler,
+		User:        userHandler,
+		Event:       eventHandler,
+		Application: appHandler,
+		TM:          tm,
 	})
 
 	// Раздача загруженных файлов

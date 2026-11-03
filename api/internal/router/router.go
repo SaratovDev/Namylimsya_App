@@ -11,11 +11,12 @@ import (
 )
 
 type Deps struct {
-	Health *handlers.HealthHandler
-	Auth   *handlers.AuthHandler
-	User   *handlers.UserHandler
-	Event  *handlers.EventHandler
-	TM     *auth.TokenManager
+	Health      *handlers.HealthHandler
+	Auth        *handlers.AuthHandler
+	User        *handlers.UserHandler
+	Event       *handlers.EventHandler
+	TM          *auth.TokenManager
+	Application *handlers.ApplicationHandler
 }
 
 func New(deps Deps) chi.Router {
@@ -38,9 +39,10 @@ func New(deps Deps) chi.Router {
 
 	r.Route("/api/v1", func(api chi.Router) {
 		api.Get("/health", deps.Health.Get)
-		api.Get("/events", deps.Event.GetFeed)      // публичный
-		api.Get("/events/{id}", deps.Event.GetByID) // публичный
-		api.Get("/users/{id}", deps.User.GetPublic) // публичный
+
+		api.With(custommw.OptionalAuth(deps.TM)).Get("/events/{id}", deps.Event.GetByID)
+		api.With(custommw.OptionalAuth(deps.TM)).Get("/events/{id}", deps.Event.GetByID)
+		api.Get("/users/{id}", deps.User.GetPublic)
 
 		api.Route("/auth", func(r chi.Router) {
 			r.Post("/register", deps.Auth.Register)
@@ -49,19 +51,21 @@ func New(deps Deps) chi.Router {
 			r.Post("/logout", deps.Auth.Logout)
 		})
 
-		// Защищённые роуты
 		api.Group(func(r chi.Router) {
 			r.Use(custommw.AuthRequired(deps.TM))
 			r.Get("/users/me", deps.Auth.Me)
 			r.Patch("/users/me", deps.User.UpdateMe)
 			r.Post("/users/me/avatar", deps.User.UploadAvatar)
+
 			r.Post("/events", deps.Event.Create)
 			r.Post("/events/{id}/cancel", deps.Event.Cancel)
+			r.Post("/events/{id}/applications", deps.Application.Apply)
+			r.Get("/events/{id}/applications", deps.Application.ListForEvent)
+
+			r.Patch("/applications/{id}/approve", deps.Application.Approve)
+			r.Patch("/applications/{id}/reject", deps.Application.Reject)
+			r.Post("/applications/{id}/cancel", deps.Application.Cancel)
 		})
-
-		// Публичные роуты
-		api.Get("/users/{id}", deps.User.GetPublic)
-
 	})
 
 	return r

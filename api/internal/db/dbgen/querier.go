@@ -12,15 +12,22 @@ import (
 
 type Querier interface {
 	CancelEvent(ctx context.Context, arg CancelEventParams) (Event, error)
+	CountActiveApplicationsByUser(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountActiveEventsByOrganizer(ctx context.Context, organizerID uuid.UUID) (int64, error)
+	CountApprovedApplicationsForEvent(ctx context.Context, eventID uuid.UUID) (int64, error)
+	CreateApplication(ctx context.Context, arg CreateApplicationParams) (Application, error)
 	CreateEvent(ctx context.Context, arg CreateEventParams) (Event, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	GetApplication(ctx context.Context, id uuid.UUID) (Application, error)
 	GetEventByID(ctx context.Context, id uuid.UUID) (Event, error)
 	GetEventsArchive(ctx context.Context, arg GetEventsArchiveParams) ([]GetEventsArchiveRow, error)
 	GetEventsFeed(ctx context.Context, arg GetEventsFeedParams) ([]GetEventsFeedRow, error)
 	GetPublicUser(ctx context.Context, id uuid.UUID) (GetPublicUserRow, error)
+	GetUserApplicationForEvent(ctx context.Context, arg GetUserApplicationForEventParams) (Application, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
+	ListEventApplications(ctx context.Context, eventID uuid.UUID) ([]ListEventApplicationsRow, error)
+	UpdateApplicationStatus(ctx context.Context, arg UpdateApplicationStatusParams) (Application, error)
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
 }
 

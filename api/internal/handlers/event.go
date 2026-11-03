@@ -14,11 +14,12 @@ import (
 )
 
 type EventHandler struct {
-	svc *services.EventService
+	svc    *services.EventService
+	appSvc *services.ApplicationService
 }
 
-func NewEventHandler(svc *services.EventService) *EventHandler {
-	return &EventHandler{svc: svc}
+func NewEventHandler(svc *services.EventService, appSvc *services.ApplicationService) *EventHandler {
+	return &EventHandler{svc: svc, appSvc: appSvc}
 }
 
 type createEventRequest struct {
@@ -141,7 +142,35 @@ func (h *EventHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httpx.OK(w, event)
+	// Текущий пользователь (может быть nil — гость)
+	var userIDPtr *uuid.UUID
+	if uid, ok := middleware.GetUserID(r.Context()); ok {
+		userIDPtr = &uid
+	}
+
+	canSee, _ := h.appSvc.CanSeeExactLocation(r.Context(), id, userIDPtr)
+
+	resp := map[string]any{
+		"id":                     event.ID,
+		"organizer_id":           event.OrganizerID,
+		"title":                  event.Title,
+		"category":               event.Category,
+		"description":            event.Description,
+		"starts_at":              event.StartsAt,
+		"city":                   event.City,
+		"hide_exact_location":    event.HideExactLocation,
+		"participant_limit":      event.ParticipantLimit,
+		"status":                 event.Status,
+		"created_at":             event.CreatedAt,
+		"can_see_exact_location": canSee,
+	}
+	if canSee {
+		resp["address"] = event.Address
+		resp["lat"] = event.Lat
+		resp["lng"] = event.Lng
+	}
+
+	httpx.OK(w, resp)
 }
 
 type cancelEventRequest struct {

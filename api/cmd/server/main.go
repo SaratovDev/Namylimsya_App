@@ -63,7 +63,8 @@ func main() {
 	sm := auth.NewSessionManager(rdb)
 
 	queries := dbgen.New(pgPool)
-
+	adminSvc := services.NewAdminService(queries)
+	adminHandler := handlers.NewAdminHandler(adminSvc)
 	authSvc := services.NewAuthService(queries, tm, sm)
 	authHandler := handlers.NewAuthHandler(authSvc)
 
@@ -138,6 +139,7 @@ func main() {
 		Notification:   notifHandler,
 		WSNotification: wsNotifHandler,
 		TM:             tm,
+		Admin:          adminHandler,
 	})
 
 	// Раздача загруженных файлов

@@ -21,6 +21,7 @@ type Deps struct {
 	Notification   *handlers.NotificationHandler
 	WSNotification *handlers.WSNotificationHandler
 	TM             *auth.TokenManager
+	Admin          *handlers.AdminHandler
 }
 
 func New(deps Deps) chi.Router {
@@ -76,6 +77,21 @@ func New(deps Deps) chi.Router {
 			r.Post("/events/{id}/messages", deps.Chat.SendHTTP)
 			r.Post("/events/{id}/messages/read", deps.Chat.MarkRead)
 		})
+
+		api.Group(func(r chi.Router) {
+			r.Use(custommw.AuthRequired(deps.TM))
+			r.Use(custommw.RequireRole("admin")) // только admin, не moderator
+
+			r.Get("/admin/dashboard", deps.Admin.Dashboard)
+
+			r.Get("/admin/users", deps.Admin.ListUsers)
+			r.Patch("/admin/users/{id}/role", deps.Admin.UpdateUserRole)
+			r.Patch("/admin/users/{id}/ban", deps.Admin.BanUser)
+
+			r.Get("/admin/events", deps.Admin.ListEvents)
+			r.Delete("/admin/events/{id}", deps.Admin.DeleteEvent)
+		})
+
 	})
 
 	// WS — вне /api/v1, без AuthRequired (авторизация внутри через ?token=)

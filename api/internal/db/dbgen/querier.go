@@ -12,6 +12,17 @@ import (
 )
 
 type Querier interface {
+	AdminActivityChart(ctx context.Context) ([]AdminActivityChartRow, error)
+	AdminBanUser(ctx context.Context, arg AdminBanUserParams) (AdminBanUserRow, error)
+	AdminDashboardApplications(ctx context.Context) (AdminDashboardApplicationsRow, error)
+	AdminDashboardEvents(ctx context.Context) (AdminDashboardEventsRow, error)
+	AdminDashboardUsers(ctx context.Context) (AdminDashboardUsersRow, error)
+	AdminDeleteEvent(ctx context.Context, id uuid.UUID) error
+	AdminListEvents(ctx context.Context, arg AdminListEventsParams) ([]AdminListEventsRow, error)
+	AdminListUsers(ctx context.Context, arg AdminListUsersParams) ([]AdminListUsersRow, error)
+	AdminTopCategories(ctx context.Context) ([]AdminTopCategoriesRow, error)
+	AdminTopOrganizers(ctx context.Context) ([]AdminTopOrganizersRow, error)
+	AdminUpdateUserRole(ctx context.Context, arg AdminUpdateUserRoleParams) (AdminUpdateUserRoleRow, error)
 	CancelEvent(ctx context.Context, arg CancelEventParams) (Event, error)
 	CountActiveApplicationsByUser(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountActiveEventsByOrganizer(ctx context.Context, organizerID uuid.UUID) (int64, error)

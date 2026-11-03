@@ -30,3 +30,7 @@ FROM applications a
 JOIN users u ON u.id = a.user_id
 WHERE a.event_id = $1
 ORDER BY a.created_at ASC;
+
+-- name: ListApprovedForEvent :many
+SELECT * FROM applications 
+WHERE event_id = $1 AND status = 'approved';

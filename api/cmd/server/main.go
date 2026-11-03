@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/SaratovDev/Namylimsya_App/api/internal/config"
 	"github.com/SaratovDev/Namylimsya_App/api/internal/db"
 	"github.com/SaratovDev/Namylimsya_App/api/internal/db/dbgen"
+	"github.com/SaratovDev/Namylimsya_App/api/internal/email"
 	"github.com/SaratovDev/Namylimsya_App/api/internal/handlers"
 	"github.com/SaratovDev/Namylimsya_App/api/internal/ratelimit"
 	"github.com/SaratovDev/Namylimsya_App/api/internal/router"
@@ -51,7 +53,7 @@ func main() {
 	defer rdb.Close()
 	log.Info().Msg("redis connected")
 
-	// --- Инициализация Auth ---
+	// --- Auth ---
 	tm := auth.NewTokenManager(
 		cfg.JWT.AccessSecret,
 		cfg.JWT.RefreshSecret,
@@ -65,7 +67,7 @@ func main() {
 	authSvc := services.NewAuthService(queries, tm, sm)
 	authHandler := handlers.NewAuthHandler(authSvc)
 
-	// Storage
+	// --- Storage ---
 	localStorage, err := storage.NewLocalStorage(
 		cfg.Storage.LocalPath,
 		"http://localhost:"+cfg.HTTPPort+"/static",
@@ -74,31 +76,68 @@ func main() {
 		log.Fatal().Err(err).Msg("init storage")
 	}
 
+	// --- Email ---
+	mailer := email.NewSender(
+		cfg.SMTP.Host,
+		cfg.SMTP.Port,
+		cfg.SMTP.User,
+		cfg.SMTP.Pass,
+		cfg.SMTP.From,
+		!cfg.SMTP.EmailVerificationEnabled, // если email выключен — mailer disabled
+	)
+
+	// --- Notifications ---
+	notifSvc := services.NewNotificationService(queries, mailer)
+	notifWorker := services.NewNotificationWorker(queries, mailer)
+	notifSvc.SetEmailEnqueuer(notifWorker.Enqueue)
+
+	notifHub := ws.NewNotificationHub()
+	notifSvc.SetWSNotifier(func(userID uuid.UUID, payload map[string]any) {
+		notifHub.SendToUser(userID, map[string]any{
+			"type": "notification",
+			"data": payload,
+		})
+	})
+
+	// Запуск воркера email-батчинга в фоне
+	go notifWorker.Start(ctx)
+	defer notifWorker.Stop()
+
+	notifHandler := handlers.NewNotificationHandler(notifSvc)
+	wsNotifHandler := handlers.NewWSNotificationHandler(notifHub, tm)
+
+	// --- Chat ---
 	hub := ws.NewHub()
 	chatSvc := services.NewChatService(queries)
 	chatHandler := handlers.NewChatHandler(chatSvc, hub)
 	rl := ratelimit.New(rdb)
 	wsHandler := handlers.NewWSHandler(hub, chatSvc, tm, rl)
 
-	// User service & handler
+	// --- User ---
 	userSvc := services.NewUserService(queries, localStorage)
 	userHandler := handlers.NewUserHandler(userSvc)
-	appSvc := services.NewApplicationService(queries)
+
+	// --- Applications (с notifSvc) ---
+	appSvc := services.NewApplicationService(queries, notifSvc)
 	appHandler := handlers.NewApplicationHandler(appSvc)
-	eventSvc := services.NewEventService(queries)
+
+	// --- Events (с notifSvc) ---
+	eventSvc := services.NewEventService(queries, notifSvc)
 	eventHandler := handlers.NewEventHandler(eventSvc, appSvc)
 
-	// --- Роутер ---
+	// --- Router ---
 	health := &handlers.HealthHandler{DB: pgPool, Redis: rdb}
 	r := router.New(router.Deps{
-		Health:      health,
-		Auth:        authHandler,
-		User:        userHandler,
-		Event:       eventHandler,
-		Application: appHandler,
-		TM:          tm,
-		Chat:        chatHandler,
-		WS:          wsHandler,
+		Health:         health,
+		Auth:           authHandler,
+		User:           userHandler,
+		Event:          eventHandler,
+		Application:    appHandler,
+		Chat:           chatHandler,
+		WS:             wsHandler,
+		Notification:   notifHandler,
+		WSNotification: wsNotifHandler,
+		TM:             tm,
 	})
 
 	// Раздача загруженных файлов
@@ -127,5 +166,4 @@ func main() {
 		log.Error().Err(err).Msg("shutdown")
 	}
 	log.Info().Msg("server stopped")
-
 }

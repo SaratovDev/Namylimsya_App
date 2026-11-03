@@ -95,8 +95,8 @@ func newTestEnv(t *testing.T) *testEnv {
 	userSvc := services.NewUserService(queries, localStorage)
 	userHandler := handlers.NewUserHandler(userSvc)
 
-	eventSvc := services.NewEventService(queries)
-	appSvc := services.NewApplicationService(queries)
+	eventSvc := services.NewEventService(queries, nil)
+	appSvc := services.NewApplicationService(queries, nil)
 	eventHandler := handlers.NewEventHandler(eventSvc, appSvc)
 	appHandler := handlers.NewApplicationHandler(appSvc)
 

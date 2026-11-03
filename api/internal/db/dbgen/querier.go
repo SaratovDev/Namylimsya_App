@@ -17,9 +17,11 @@ type Querier interface {
 	CountActiveEventsByOrganizer(ctx context.Context, organizerID uuid.UUID) (int64, error)
 	CountApprovedApplicationsForEvent(ctx context.Context, eventID uuid.UUID) (int64, error)
 	CountUnreadMessages(ctx context.Context, arg CountUnreadMessagesParams) (int64, error)
+	CountUnreadNotifications(ctx context.Context, userID uuid.UUID) (int64, error)
 	CreateApplication(ctx context.Context, arg CreateApplicationParams) (Application, error)
 	CreateEvent(ctx context.Context, arg CreateEventParams) (Event, error)
 	CreateMessage(ctx context.Context, arg CreateMessageParams) (ChatMessage, error)
+	CreateNotification(ctx context.Context, arg CreateNotificationParams) (Notification, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	GetApplication(ctx context.Context, id uuid.UUID) (Application, error)
 	GetEventByID(ctx context.Context, id uuid.UUID) (Event, error)
@@ -27,12 +29,16 @@ type Querier interface {
 	GetEventsFeed(ctx context.Context, arg GetEventsFeedParams) ([]GetEventsFeedRow, error)
 	GetLastRead(ctx context.Context, arg GetLastReadParams) (time.Time, error)
 	GetMessages(ctx context.Context, arg GetMessagesParams) ([]GetMessagesRow, error)
+	GetNotifications(ctx context.Context, arg GetNotificationsParams) ([]Notification, error)
 	GetPublicUser(ctx context.Context, id uuid.UUID) (GetPublicUserRow, error)
 	GetUserApplicationForEvent(ctx context.Context, arg GetUserApplicationForEventParams) (Application, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
+	ListApprovedForEvent(ctx context.Context, eventID uuid.UUID) ([]Application, error)
 	ListEventApplications(ctx context.Context, eventID uuid.UUID) ([]ListEventApplicationsRow, error)
+	MarkAllNotificationsRead(ctx context.Context, userID uuid.UUID) error
 	MarkChatRead(ctx context.Context, arg MarkChatReadParams) error
+	MarkNotificationRead(ctx context.Context, arg MarkNotificationReadParams) error
 	UpdateApplicationStatus(ctx context.Context, arg UpdateApplicationStatusParams) (Application, error)
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
 }

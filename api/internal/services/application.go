@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 
+	"github.com/rs/zerolog/log"
+
 	"github.com/SaratovDev/Namylimsya_App/api/internal/db/dbgen"
 	"github.com/google/uuid"
 )
@@ -18,11 +20,12 @@ var (
 )
 
 type ApplicationService struct {
-	db *dbgen.Queries
+	db    *dbgen.Queries
+	notif *NotificationService
 }
 
-func NewApplicationService(db *dbgen.Queries) *ApplicationService {
-	return &ApplicationService{db: db}
+func NewApplicationService(db *dbgen.Queries, notif *NotificationService) *ApplicationService {
+	return &ApplicationService{db: db, notif: notif}
 }
 
 func (s *ApplicationService) Apply(ctx context.Context, eventID, userID uuid.UUID) (*dbgen.Application, error) {
@@ -59,6 +62,28 @@ func (s *ApplicationService) Apply(ctx context.Context, eventID, userID uuid.UUI
 	if err != nil {
 		return nil, err
 	}
+
+	// Уведомляем организатора о новой заявке
+	if s.notif != nil {
+		if _, err := s.notif.Create(ctx, CreateInput{
+			UserID: event.OrganizerID,
+			Type:   "application_new",
+			Payload: map[string]any{
+				"event_id":       eventID,
+				"event_title":    event.Title,
+				"applicant_id":   userID,
+				"application_id": app.ID,
+			},
+			SendEmail: true,
+		}); err != nil {
+			log.Warn().Err(err).
+				Str("type", "application_new").
+				Str("event_id", eventID.String()).
+				Str("application_id", app.ID.String()).
+				Msg("failed to create notification")
+		}
+	}
+
 	return &app, nil
 }
 
@@ -97,6 +122,26 @@ func (s *ApplicationService) Approve(ctx context.Context, applicationID, organiz
 	if err != nil {
 		return nil, err
 	}
+
+	// Уведомляем участника об одобрении
+	if s.notif != nil {
+		if _, err := s.notif.Create(ctx, CreateInput{
+			UserID: updated.UserID,
+			Type:   "application_approved",
+			Payload: map[string]any{
+				"event_id":       updated.EventID,
+				"application_id": updated.ID,
+			},
+			SendEmail: true,
+		}); err != nil {
+			log.Warn().Err(err).
+				Str("type", "application_approved").
+				Str("event_id", updated.EventID.String()).
+				Str("application_id", updated.ID.String()).
+				Msg("failed to create notification")
+		}
+	}
+
 	return &updated, nil
 }
 
@@ -123,6 +168,26 @@ func (s *ApplicationService) Reject(ctx context.Context, applicationID, organize
 	if err != nil {
 		return nil, err
 	}
+
+	// Уведомляем участника об отказе
+	if s.notif != nil {
+		if _, err := s.notif.Create(ctx, CreateInput{
+			UserID: updated.UserID,
+			Type:   "application_rejected",
+			Payload: map[string]any{
+				"event_id":       updated.EventID,
+				"application_id": updated.ID,
+			},
+			SendEmail: true,
+		}); err != nil {
+			log.Warn().Err(err).
+				Str("type", "application_rejected").
+				Str("event_id", updated.EventID.String()).
+				Str("application_id", updated.ID.String()).
+				Msg("failed to create notification")
+		}
+	}
+
 	return &updated, nil
 }
 
@@ -151,6 +216,38 @@ func (s *ApplicationService) Cancel(ctx context.Context, applicationID, userID u
 	if err != nil {
 		return nil, err
 	}
+
+	// Уведомляем организатора об отмене заявки участником
+	if s.notif != nil {
+		event, err := s.db.GetEventByID(ctx, updated.EventID)
+		if err == nil {
+			payload := map[string]any{
+				"event_id":       updated.EventID,
+				"application_id": updated.ID,
+				"applicant_id":   updated.UserID,
+			}
+			if reason != "" {
+				payload["reason"] = reason
+			}
+			if _, err := s.notif.Create(ctx, CreateInput{
+				UserID:    event.OrganizerID,
+				Type:      "application_cancelled",
+				Payload:   payload,
+				SendEmail: true,
+			}); err != nil {
+				log.Warn().Err(err).
+					Str("type", "application_cancelled").
+					Str("event_id", updated.EventID.String()).
+					Str("application_id", updated.ID.String()).
+					Msg("failed to create notification")
+			}
+		} else {
+			log.Warn().Err(err).
+				Str("event_id", updated.EventID.String()).
+				Msg("failed to load event for cancellation notification")
+		}
+	}
+
 	return &updated, nil
 }
 

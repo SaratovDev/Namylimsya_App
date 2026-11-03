@@ -106,6 +106,39 @@ func (q *Queries) GetUserApplicationForEvent(ctx context.Context, arg GetUserApp
 	return i, err
 }
 
+const listApprovedForEvent = `-- name: ListApprovedForEvent :many
+SELECT id, event_id, user_id, status, cancel_reason, created_at, updated_at FROM applications 
+WHERE event_id = $1 AND status = 'approved'
+`
+
+func (q *Queries) ListApprovedForEvent(ctx context.Context, eventID uuid.UUID) ([]Application, error) {
+	rows, err := q.db.Query(ctx, listApprovedForEvent, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Application{}
+	for rows.Next() {
+		var i Application
+		if err := rows.Scan(
+			&i.ID,
+			&i.EventID,
+			&i.UserID,
+			&i.Status,
+			&i.CancelReason,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listEventApplications = `-- name: ListEventApplications :many
 SELECT a.id, a.event_id, a.user_id, a.status, a.cancel_reason, a.created_at, a.updated_at, u.username, u.avatar_url
 FROM applications a

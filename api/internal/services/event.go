@@ -8,6 +8,7 @@ import (
 	"github.com/SaratovDev/Namylimsya_App/api/internal/db/dbgen"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/rs/zerolog/log"
 )
 
 var (
@@ -17,11 +18,12 @@ var (
 )
 
 type EventService struct {
-	db *dbgen.Queries
+	db    *dbgen.Queries
+	notif *NotificationService
 }
 
-func NewEventService(db *dbgen.Queries) *EventService {
-	return &EventService{db: db}
+func NewEventService(db *dbgen.Queries, notif *NotificationService) *EventService {
+	return &EventService{db: db, notif: notif}
 }
 
 type CreateEventInput struct {
@@ -132,5 +134,39 @@ func (s *EventService) Cancel(ctx context.Context, eventID, organizerID uuid.UUI
 	if err != nil {
 		return nil, ErrNotEventOwner
 	}
+
+	// Уведомляем всех одобренных участников об отмене
+	if s.notif != nil {
+		approvedApps, err := s.db.ListApprovedForEvent(ctx, eventID)
+		if err != nil {
+			log.Warn().Err(err).
+				Str("event_id", eventID.String()).
+				Msg("failed to load approved applications for cancellation notification")
+		} else {
+			for _, app := range approvedApps {
+				payload := map[string]any{
+					"event_id":       eventID,
+					"event_title":    event.Title,
+					"application_id": app.ID,
+				}
+				if reason != "" {
+					payload["reason"] = reason
+				}
+				if _, err := s.notif.Create(ctx, CreateInput{
+					UserID:    app.UserID,
+					Type:      "event_cancelled",
+					Payload:   payload,
+					SendEmail: true,
+				}); err != nil {
+					log.Warn().Err(err).
+						Str("type", "event_cancelled").
+						Str("event_id", eventID.String()).
+						Str("user_id", app.UserID.String()).
+						Msg("failed to create cancellation notification")
+				}
+			}
+		}
+	}
+
 	return &event, nil
 }

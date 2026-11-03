@@ -11,14 +11,16 @@ import (
 )
 
 type Deps struct {
-	Health      *handlers.HealthHandler
-	Auth        *handlers.AuthHandler
-	User        *handlers.UserHandler
-	Event       *handlers.EventHandler
-	TM          *auth.TokenManager
-	Application *handlers.ApplicationHandler
-	Chat        *handlers.ChatHandler
-	WS          *handlers.WSHandler
+	Health         *handlers.HealthHandler
+	Auth           *handlers.AuthHandler
+	User           *handlers.UserHandler
+	Event          *handlers.EventHandler
+	Application    *handlers.ApplicationHandler
+	Chat           *handlers.ChatHandler
+	WS             *handlers.WSHandler
+	Notification   *handlers.NotificationHandler
+	WSNotification *handlers.WSNotificationHandler
+	TM             *auth.TokenManager
 }
 
 func New(deps Deps) chi.Router {
@@ -41,7 +43,9 @@ func New(deps Deps) chi.Router {
 
 	r.Route("/api/v1", func(api chi.Router) {
 		api.Get("/health", deps.Health.Get)
-
+		r.Get("/notifications", deps.Notification.List)
+		r.Patch("/notifications/{id}/read", deps.Notification.MarkRead)
+		r.Patch("/notifications/read-all", deps.Notification.MarkAllRead)
 		api.With(custommw.OptionalAuth(deps.TM)).Get("/events/{id}", deps.Event.GetByID)
 		api.With(custommw.OptionalAuth(deps.TM)).Get("/events/{id}", deps.Event.GetByID)
 		api.Get("/users/{id}", deps.User.GetPublic)
@@ -76,6 +80,7 @@ func New(deps Deps) chi.Router {
 
 	// WS — вне /api/v1, без AuthRequired (авторизация внутри через ?token=)
 	r.Get("/ws/events/{id}", deps.WS.Handle)
+	r.Get("/ws/notifications", deps.WSNotification.Handle)
 
 	return r
 }

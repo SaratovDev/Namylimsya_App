@@ -5,11 +5,11 @@
 package dbgen
 
 import (
-	"database/sql"
 	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Application struct {
@@ -43,23 +43,23 @@ type Complaint struct {
 }
 
 type Event struct {
-	ID                uuid.UUID       `json:"id"`
-	OrganizerID       uuid.UUID       `json:"organizer_id"`
-	Title             string          `json:"title"`
-	Category          string          `json:"category"`
-	Description       *string         `json:"description"`
-	StartsAt          time.Time       `json:"starts_at"`
-	City              string          `json:"city"`
-	Address           *string         `json:"address"`
-	Lat               sql.NullFloat64 `json:"lat"`
-	Lng               sql.NullFloat64 `json:"lng"`
-	Location          interface{}     `json:"location"`
-	HideExactLocation bool            `json:"hide_exact_location"`
-	ParticipantLimit  sql.NullInt32   `json:"participant_limit"`
-	Status            string          `json:"status"`
-	CancelReason      *string         `json:"cancel_reason"`
-	CreatedAt         time.Time       `json:"created_at"`
-	UpdatedAt         time.Time       `json:"updated_at"`
+	ID                uuid.UUID     `json:"id"`
+	OrganizerID       uuid.UUID     `json:"organizer_id"`
+	Title             string        `json:"title"`
+	Category          string        `json:"category"`
+	Description       *string       `json:"description"`
+	StartsAt          time.Time     `json:"starts_at"`
+	City              string        `json:"city"`
+	Address           *string       `json:"address"`
+	Lat               pgtype.Float8 `json:"lat"`
+	Lng               pgtype.Float8 `json:"lng"`
+	Location          interface{}   `json:"location"`
+	HideExactLocation bool          `json:"hide_exact_location"`
+	ParticipantLimit  pgtype.Int4   `json:"participant_limit"`
+	Status            string        `json:"status"`
+	CancelReason      *string       `json:"cancel_reason"`
+	CreatedAt         time.Time     `json:"created_at"`
+	UpdatedAt         time.Time     `json:"updated_at"`
 }
 
 type Notification struct {
@@ -82,23 +82,23 @@ type SupportTicket struct {
 }
 
 type User struct {
-	ID            uuid.UUID    `json:"id"`
-	Email         string       `json:"email"`
-	PasswordHash  string       `json:"password_hash"`
-	Username      string       `json:"username"`
-	Gender        *string      `json:"gender"`
-	BirthDate     sql.NullTime `json:"birth_date"`
-	ShowAge       bool         `json:"show_age"`
-	City          *string      `json:"city"`
-	Bio           *string      `json:"bio"`
-	Hobbies       []string     `json:"hobbies"`
-	Telegram      *string      `json:"telegram"`
-	Vk            *string      `json:"vk"`
-	AvatarUrl     *string      `json:"avatar_url"`
-	Role          string       `json:"role"`
-	IsBanned      bool         `json:"is_banned"`
-	BanReason     *string      `json:"ban_reason"`
-	EmailVerified bool         `json:"email_verified"`
-	CreatedAt     time.Time    `json:"created_at"`
-	UpdatedAt     time.Time    `json:"updated_at"`
+	ID            uuid.UUID   `json:"id"`
+	Email         string      `json:"email"`
+	PasswordHash  string      `json:"password_hash"`
+	Username      string      `json:"username"`
+	Gender        *string     `json:"gender"`
+	BirthDate     pgtype.Date `json:"birth_date"`
+	ShowAge       bool        `json:"show_age"`
+	City          *string     `json:"city"`
+	Bio           *string     `json:"bio"`
+	Hobbies       []string    `json:"hobbies"`
+	Telegram      *string     `json:"telegram"`
+	Vk            *string     `json:"vk"`
+	AvatarUrl     *string     `json:"avatar_url"`
+	Role          string      `json:"role"`
+	IsBanned      bool        `json:"is_banned"`
+	BanReason     *string     `json:"ban_reason"`
+	EmailVerified bool        `json:"email_verified"`
+	CreatedAt     time.Time   `json:"created_at"`
+	UpdatedAt     time.Time   `json:"updated_at"`
 }

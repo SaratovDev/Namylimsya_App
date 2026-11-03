@@ -7,10 +7,9 @@ package dbgen
 
 import (
 	"context"
-	"database/sql"
 
 	"github.com/google/uuid"
-	"github.com/lib/pq"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createUser = `-- name: CreateUser :one
@@ -22,16 +21,16 @@ INSERT INTO users (
 `
 
 type CreateUserParams struct {
-	Email        string       `json:"email"`
-	PasswordHash string       `json:"password_hash"`
-	Username     string       `json:"username"`
-	Gender       *string      `json:"gender"`
-	BirthDate    sql.NullTime `json:"birth_date"`
-	City         *string      `json:"city"`
+	Email        string      `json:"email"`
+	PasswordHash string      `json:"password_hash"`
+	Username     string      `json:"username"`
+	Gender       *string     `json:"gender"`
+	BirthDate    pgtype.Date `json:"birth_date"`
+	City         *string     `json:"city"`
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
-	row := q.db.QueryRowContext(ctx, createUser,
+	row := q.db.QueryRow(ctx, createUser,
 		arg.Email,
 		arg.PasswordHash,
 		arg.Username,
@@ -50,7 +49,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.ShowAge,
 		&i.City,
 		&i.Bio,
-		pq.Array(&i.Hobbies),
+		&i.Hobbies,
 		&i.Telegram,
 		&i.Vk,
 		&i.AvatarUrl,
@@ -69,7 +68,7 @@ SELECT id, email, password_hash, username, gender, birth_date, show_age, city, b
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
-	row := q.db.QueryRowContext(ctx, getUserByEmail, email)
+	row := q.db.QueryRow(ctx, getUserByEmail, email)
 	var i User
 	err := row.Scan(
 		&i.ID,
@@ -81,7 +80,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.ShowAge,
 		&i.City,
 		&i.Bio,
-		pq.Array(&i.Hobbies),
+		&i.Hobbies,
 		&i.Telegram,
 		&i.Vk,
 		&i.AvatarUrl,
@@ -100,7 +99,7 @@ SELECT id, email, password_hash, username, gender, birth_date, show_age, city, b
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
-	row := q.db.QueryRowContext(ctx, getUserByID, id)
+	row := q.db.QueryRow(ctx, getUserByID, id)
 	var i User
 	err := row.Scan(
 		&i.ID,
@@ -112,7 +111,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.ShowAge,
 		&i.City,
 		&i.Bio,
-		pq.Array(&i.Hobbies),
+		&i.Hobbies,
 		&i.Telegram,
 		&i.Vk,
 		&i.AvatarUrl,
@@ -149,12 +148,12 @@ type UpdateUserParams struct {
 }
 
 func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error) {
-	row := q.db.QueryRowContext(ctx, updateUser,
+	row := q.db.QueryRow(ctx, updateUser,
 		arg.ID,
 		arg.Column2,
 		arg.Column3,
 		arg.Column4,
-		pq.Array(arg.Column5),
+		arg.Column5,
 		arg.Column6,
 	)
 	var i User
@@ -168,7 +167,7 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		&i.ShowAge,
 		&i.City,
 		&i.Bio,
-		pq.Array(&i.Hobbies),
+		&i.Hobbies,
 		&i.Telegram,
 		&i.Vk,
 		&i.AvatarUrl,

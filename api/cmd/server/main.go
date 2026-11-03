@@ -12,11 +12,14 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
+	"github.com/SaratovDev/Namylimsya_App/api/internal/auth"
 	"github.com/SaratovDev/Namylimsya_App/api/internal/cache"
 	"github.com/SaratovDev/Namylimsya_App/api/internal/config"
 	"github.com/SaratovDev/Namylimsya_App/api/internal/db"
+	"github.com/SaratovDev/Namylimsya_App/api/internal/db/dbgen"
 	"github.com/SaratovDev/Namylimsya_App/api/internal/handlers"
 	"github.com/SaratovDev/Namylimsya_App/api/internal/router"
+	"github.com/SaratovDev/Namylimsya_App/api/internal/services"
 )
 
 func main() {
@@ -45,8 +48,27 @@ func main() {
 	defer rdb.Close()
 	log.Info().Msg("redis connected")
 
+	// --- Инициализация Auth ---
+	tm := auth.NewTokenManager(
+		cfg.JWT.AccessSecret,
+		cfg.JWT.RefreshSecret,
+		cfg.JWT.AccessTTL,
+		cfg.JWT.RefreshTTL,
+	)
+	sm := auth.NewSessionManager(rdb)
+
+	queries := dbgen.New(pgPool)
+
+	authSvc := services.NewAuthService(queries, tm, sm)
+	authHandler := handlers.NewAuthHandler(authSvc)
+
+	// --- Роутер ---
 	health := &handlers.HealthHandler{DB: pgPool, Redis: rdb}
-	r := router.New(router.Deps{Health: health})
+	r := router.New(router.Deps{
+		Health: health,
+		Auth:   authHandler,
+		TM:     tm,
+	})
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTPPort,
@@ -61,7 +83,6 @@ func main() {
 		}
 	}()
 
-	// graceful shutdown
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop

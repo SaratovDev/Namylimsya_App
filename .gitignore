@@ -29,22 +29,20 @@ Thumbs.db
 .DS_Store
 
 # Storage (local driver)
-api/storage/
-storage/
+
 
 # Docker
 infra/data/
 
 bin/
 tmp/
-storage/
+
 *.exe
 *.test
 *.out
 .env
 
 cookies.txt
-api/storage/
 *.jpg
 *.jpeg
 *.png

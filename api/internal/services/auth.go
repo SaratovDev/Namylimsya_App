@@ -76,7 +76,7 @@ func (s *AuthService) Register(ctx context.Context, input RegisterInput) (*dbgen
 		if pgErr, ok := err.(*pgconn.PgError); ok && pgErr.Code == "23505" {
 			return nil, ErrUserExists
 		}
-		return nil, err
+		return nil, fmt.Errorf("create user: %w", err)
 	}
 
 	return &user, nil

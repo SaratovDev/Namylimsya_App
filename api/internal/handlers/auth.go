@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 
 	"github.com/SaratovDev/Namylimsya_App/api/internal/httpx"
 	"github.com/SaratovDev/Namylimsya_App/api/internal/middleware"
 	"github.com/SaratovDev/Namylimsya_App/api/internal/services"
+	"github.com/rs/zerolog/log"
 )
 
 type AuthHandler struct {
@@ -54,7 +56,13 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 			httpx.Error(w, http.StatusConflict, "conflict", "user already exists")
 			return
 		}
-		httpx.Error(w, http.StatusInternalServerError, "internal", "failed to register")
+		log.Error().Err(err).Msg("register failed")
+
+		msg := "failed to register"
+		if os.Getenv("APP_ENV") != "production" {
+			msg = err.Error()
+		}
+		httpx.Error(w, http.StatusInternalServerError, "internal", msg)
 		return
 	}
 

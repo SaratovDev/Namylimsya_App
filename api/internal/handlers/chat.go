@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -22,6 +23,25 @@ type ChatHandler struct {
 
 func NewChatHandler(svc *services.ChatService, hub *ws.Hub) *ChatHandler {
 	return &ChatHandler{svc: svc, hub: hub}
+}
+
+// mapChatErr — единая маппинг ошибок чата:
+//   - ErrNotChatMember → 403 без деталей (не палим текст ошибки БД);
+//   - ErrMessageEmpty / ErrMessageTooLong → 400 с текстом (это про ввод);
+//   - всё остальное (БД упала, событие не найдено и т.п.) → 500 generic.
+//
+// Раньше любая ошибка GetHistory/Send отдавалась как 403 с err.Error(),
+// и юзер видел SQL-ошибку при недоступной БД.
+func mapChatErr(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, services.ErrNotChatMember):
+		httpx.Error(w, http.StatusForbidden, "forbidden", "you are not a member of this chat")
+	case errors.Is(err, services.ErrMessageEmpty),
+		errors.Is(err, services.ErrMessageTooLong):
+		httpx.Error(w, http.StatusBadRequest, "bad_request", err.Error())
+	default:
+		httpx.InternalError(w, err)
+	}
 }
 
 func (h *ChatHandler) History(w http.ResponseWriter, r *http.Request) {
@@ -51,11 +71,10 @@ func (h *ChatHandler) History(w http.ResponseWriter, r *http.Request) {
 
 	messages, err := h.svc.GetHistory(r.Context(), eventID, userID, cursor, limit)
 	if err != nil {
-		httpx.Error(w, http.StatusForbidden, "forbidden", err.Error())
+		mapChatErr(w, err)
 		return
 	}
 
-	// Помечаем как прочитанные при загрузке истории
 	_ = h.svc.MarkRead(r.Context(), eventID, userID)
 
 	httpx.OK(w, map[string]any{"messages": messages})
@@ -88,12 +107,18 @@ func (h *ChatHandler) SendHTTP(w http.ResponseWriter, r *http.Request) {
 		EventID: eventID, UserID: userID, Text: req.Text, ReplyToID: req.ReplyToID,
 	})
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "bad_request", err.Error())
+		mapChatErr(w, err)
 		return
 	}
 
-	// Broadcast — защита от nil hub
 	if h.hub != nil {
+		user, _ := h.svc.GetUser(r.Context(), userID)
+		userName := "Пользователь"
+		var userAvatar *string
+		if user != nil {
+			userName = user.Username
+			userAvatar = user.AvatarUrl
+		}
 		h.hub.Broadcast(eventID, map[string]any{
 			"type": "message",
 			"message": map[string]any{
@@ -103,6 +128,8 @@ func (h *ChatHandler) SendHTTP(w http.ResponseWriter, r *http.Request) {
 				"text":        msg.Text,
 				"reply_to_id": msg.ReplyToID,
 				"created_at":  msg.CreatedAt,
+				"user_name":   userName,
+				"user_avatar": userAvatar,
 			},
 		})
 	}

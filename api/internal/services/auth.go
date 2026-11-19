@@ -4,40 +4,173 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/SaratovDev/Namylimsya_App/api/internal/auth"
 	"github.com/SaratovDev/Namylimsya_App/api/internal/db/dbgen"
+	"github.com/SaratovDev/Namylimsya_App/api/internal/email"
+	"github.com/SaratovDev/Namylimsya_App/api/internal/legal"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/redis/go-redis/v9"
 )
 
 var (
-	ErrUserExists   = errors.New("user already exists")
-	ErrInvalidCreds = errors.New("invalid credentials")
+	ErrUserExists        = errors.New("Такой пользователь уже существует")
+	ErrInvalidCreds      = errors.New("Данные введены неверно")
+	ErrUserBanned        = errors.New("Ну и ну! Это же бан!")
+	ErrConsentRequired   = errors.New("Требуется согласие на обработку персональных данных")
+	ErrAgeRequired       = errors.New("Малышам нельзя, у нас тут 18+")
+	ErrConsentVersionOld = errors.New("Версия документов устарела. Обновите страницу и попробуйте снова")
+
+	// Password reset:
+	ErrInvalidResetCode = errors.New("Неверный или истёкший код")
+	ErrTooManyAttempts  = errors.New("Слишком много попыток. Подождите 15 минут.")
 )
 
 type AuthService struct {
-	db *dbgen.Queries
-	tm *auth.TokenManager
-	sm *auth.SessionManager
+	db  *dbgen.Queries
+	tm  *auth.TokenManager
+	sm  *auth.SessionManager
+	rdb *redis.Client
 }
 
-func NewAuthService(db *dbgen.Queries, tm *auth.TokenManager, sm *auth.SessionManager) *AuthService {
-	return &AuthService{db: db, tm: tm, sm: sm}
+// RequestPasswordReset — генерирует 6-значный код, сохраняет в Redis (TTL 15 мин),
+// отправляет email. Всегда возвращает nil (даже если email не найден) — чтобы
+// не палить, зарегистрирован ли email (enumeration protection).
+func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string, mailer *email.Sender) error {
+	emailAddr = strings.ToLower(strings.TrimSpace(emailAddr))
+
+	// Anti-abuse: не чаще 1 раза в 60 сек на email.
+	throttleKey := fmt.Sprintf("pwreset:throttle:%s", emailAddr)
+	ok, err := s.rdbSetNX(ctx, throttleKey, "1", 60*time.Second)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+
+	user, err := s.db.GetUserByEmail(ctx, emailAddr)
+	if err != nil {
+		return nil
+	}
+
+	code := fmt.Sprintf("%06d", rand.Intn(900000)+100000)
+
+	codeKey := fmt.Sprintf("pwreset:code:%s", emailAddr)
+	if err := s.rdbSet(ctx, codeKey, code, 15*time.Minute); err != nil {
+		return err
+	}
+
+	if mailer != nil {
+		body := fmt.Sprintf(`
+<p>Здравствуйте, %s!</p>
+<p>Вы запросили восстановление пароля на «Намылимся».</p>
+<p><b>Код: %s</b></p>
+<p>Введите его на странице восстановления. Код действует 15 минут.</p>
+<p>Если вы не запрашивали — просто проигнорируйте это письмо.</p>
+`, user.Username, code)
+
+		_ = mailer.Send(ctx, email.Message{
+			To:      emailAddr,
+			Subject: "Восстановление пароля — Намылимся",
+			Body:    body,
+		})
+	}
+
+	return nil
+}
+
+// ResetPassword — проверяет код, меняет пароль, отзывает все сессии.
+func (s *AuthService) ResetPassword(ctx context.Context, emailAddr, code, newPassword string) error {
+	emailAddr = strings.ToLower(strings.TrimSpace(emailAddr))
+
+	if len(newPassword) < 8 {
+		return errors.New("Пароль должен быть не короче 8 символов")
+	}
+	if len(newPassword) > 72 {
+		return errors.New("Пароль слишком длинный (макс. 72 символа)")
+	}
+
+	attemptsKey := fmt.Sprintf("pwreset:attempts:%s", emailAddr)
+	attempts, err := s.rdbIncr(ctx, attemptsKey, 15*time.Minute)
+	if err != nil {
+		return err
+	}
+	if attempts > 5 {
+		return ErrTooManyAttempts
+	}
+
+	codeKey := fmt.Sprintf("pwreset:code:%s", emailAddr)
+	storedCode, err := s.rdbGet(ctx, codeKey)
+	if err != nil || storedCode == "" {
+		return ErrInvalidResetCode
+	}
+	if storedCode != code {
+		return ErrInvalidResetCode
+	}
+
+	hash, err := auth.HashPassword(newPassword)
+	if err != nil {
+		return err
+	}
+
+	user, err := s.db.GetUserByEmail(ctx, emailAddr)
+	if err != nil {
+		return ErrInvalidResetCode
+	}
+
+	if err := s.db.UpdateUserPassword(ctx, dbgen.UpdateUserPasswordParams{
+		ID:           user.ID,
+		PasswordHash: hash,
+	}); err != nil {
+		return err
+	}
+
+	if s.sm != nil {
+		_ = s.sm.RevokeAllForUser(ctx, user.ID)
+	}
+
+	_ = s.rdbDel(ctx, codeKey)
+	_ = s.rdbDel(ctx, attemptsKey)
+
+	return nil
+}
+
+// ─── Redis helpers (чтобы не тащить redis.Client в auth.go) ─────
+// Эти методы должны использовать *redis.Client из SessionManager.
+// Если в SessionManager нет доступа к rdb — добавь геттер или используй s.sm.
+
+func NewAuthService(db *dbgen.Queries, tm *auth.TokenManager, sm *auth.SessionManager, rdb *redis.Client) *AuthService {
+	return &AuthService{db: db, tm: tm, sm: sm, rdb: rdb}
 }
 
 type RegisterInput struct {
-	Email     string
-	Password  string
-	Username  string
-	Gender    string
-	BirthDate string
-	City      string
+	Email           string
+	Password        string
+	Username        string
+	Gender          string
+	BirthDate       string
+	City            string
+	ConsentAccepted bool
+	AgeConfirmed    bool
+	ConsentVersion  string
 }
 
 func (s *AuthService) Register(ctx context.Context, input RegisterInput) (*dbgen.User, error) {
+	if !input.ConsentAccepted {
+		return nil, ErrConsentRequired
+	}
+	if !input.AgeConfirmed {
+		return nil, ErrAgeRequired
+	}
+	if input.ConsentVersion != legal.ConsentVersion {
+		return nil, ErrConsentVersionOld
+	}
 	hash, err := auth.HashPassword(input.Password)
 	if err != nil {
 		return nil, err
@@ -62,13 +195,17 @@ func (s *AuthService) Register(ctx context.Context, input RegisterInput) (*dbgen
 		city = &input.City
 	}
 
+	now := time.Now()
 	user, err := s.db.CreateUser(ctx, dbgen.CreateUserParams{
-		Email:        input.Email,
-		PasswordHash: hash,
-		Username:     input.Username,
-		Gender:       gender,
-		BirthDate:    birthDate,
-		City:         city,
+		Email:          input.Email,
+		PasswordHash:   hash,
+		Username:       input.Username,
+		Gender:         gender,
+		BirthDate:      birthDate,
+		City:           city,
+		ConsentAt:      &now,
+		ConsentVersion: &input.ConsentVersion,
+		AgeConfirmedAt: &now,
 	})
 
 	if err != nil {
@@ -90,6 +227,14 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (string
 
 	if !auth.CheckPasswordHash(password, user.PasswordHash) {
 		return "", "", nil, ErrInvalidCreds
+	}
+
+	// Проверяем бан ДО выдачи токенов. Бан считается активным, только если
+	// ban_expires_at пуст (бессрочный) или ещё не наступил. Истёкший бан
+	// не блокирует логин — фоновый воркер снимет is_banned в ближайшие 5 минут,
+	// но ждать его незачем.
+	if user.IsBanned && (user.BanExpiresAt == nil || user.BanExpiresAt.After(time.Now())) {
+		return "", "", nil, ErrUserBanned
 	}
 
 	accessToken, err := s.tm.GenerateAccessToken(user.ID, user.Role)
@@ -137,9 +282,18 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (string,
 	_ = s.sm.RevokeRefreshToken(ctx, claims.UserID, claims.ID)
 
 	// Получаем юзера для роли
+	// Получаем юзера для роли и проверки бана
 	user, err := s.db.GetUserByID(ctx, claims.UserID)
 	if err != nil {
 		return "", "", err
+	}
+
+	// Забаненный пользователь не может обновить access-токен.
+	// Отзываем его текущий refresh, чтобы не висел в Redis.
+	// Истёкший временный бан не считается активным.
+	if user.IsBanned && (user.BanExpiresAt == nil || user.BanExpiresAt.After(time.Now())) {
+		_ = s.sm.RevokeRefreshToken(ctx, claims.UserID, claims.ID)
+		return "", "", ErrUserBanned
 	}
 
 	newAccess, err := s.tm.GenerateAccessToken(user.ID, user.Role)
@@ -167,4 +321,35 @@ func (s *AuthService) Logout(ctx context.Context, refreshToken string) error {
 		return err
 	}
 	return s.sm.RevokeRefreshToken(ctx, claims.UserID, claims.ID)
+}
+
+func (s *AuthService) rdbSet(ctx context.Context, key, val string, ttl time.Duration) error {
+	return s.rdb.Set(ctx, key, val, ttl).Err()
+}
+
+func (s *AuthService) rdbSetNX(ctx context.Context, key, val string, ttl time.Duration) (bool, error) {
+	return s.rdb.SetNX(ctx, key, val, ttl).Result()
+}
+
+func (s *AuthService) rdbGet(ctx context.Context, key string) (string, error) {
+	val, err := s.rdb.Get(ctx, key).Result()
+	if err == redis.Nil {
+		return "", nil
+	}
+	return val, err
+}
+
+func (s *AuthService) rdbDel(ctx context.Context, key string) error {
+	return s.rdb.Del(ctx, key).Err()
+}
+
+func (s *AuthService) rdbIncr(ctx context.Context, key string, ttl time.Duration) (int64, error) {
+	val, err := s.rdb.Incr(ctx, key).Result()
+	if err != nil {
+		return 0, err
+	}
+	if val == 1 {
+		_ = s.rdb.Expire(ctx, key, ttl).Err()
+	}
+	return val, nil
 }

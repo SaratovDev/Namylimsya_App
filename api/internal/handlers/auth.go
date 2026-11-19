@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"os"
 
+	"github.com/SaratovDev/Namylimsya_App/api/internal/config"
+	"github.com/SaratovDev/Namylimsya_App/api/internal/db/dbgen"
+	"github.com/SaratovDev/Namylimsya_App/api/internal/email"
 	"github.com/SaratovDev/Namylimsya_App/api/internal/httpx"
 	"github.com/SaratovDev/Namylimsya_App/api/internal/middleware"
 	"github.com/SaratovDev/Namylimsya_App/api/internal/services"
@@ -13,20 +15,25 @@ import (
 )
 
 type AuthHandler struct {
-	svc *services.AuthService
+	svc    *services.AuthService
+	cfg    *config.Config
+	mailer *email.Sender
 }
 
-func NewAuthHandler(svc *services.AuthService) *AuthHandler {
-	return &AuthHandler{svc: svc}
+func NewAuthHandler(svc *services.AuthService, cfg *config.Config, mailer *email.Sender) *AuthHandler {
+	return &AuthHandler{svc: svc, cfg: cfg, mailer: mailer}
 }
 
 type registerRequest struct {
-	Email     string `json:"email"`
-	Password  string `json:"password"`
-	Username  string `json:"username"`
-	Gender    string `json:"gender,omitempty"`
-	BirthDate string `json:"birth_date,omitempty"`
-	City      string `json:"city,omitempty"`
+	Email           string `json:"email"`
+	Password        string `json:"password"`
+	Username        string `json:"username"`
+	Gender          string `json:"gender,omitempty"`
+	BirthDate       string `json:"birth_date,omitempty"`
+	City            string `json:"city,omitempty"`
+	ConsentAccepted bool   `json:"consent_accepted"`
+	AgeConfirmed    bool   `json:"age_confirmed"`
+	ConsentVersion  string `json:"consent_version"`
 }
 
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
@@ -38,31 +45,46 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 	// Базовая валидация (в будущем можно вынести в отдельный пакет)
 	if req.Email == "" || req.Password == "" || req.Username == "" {
-		httpx.Error(w, http.StatusBadRequest, "bad_request", "email, password and username are required")
+		httpx.Error(w, http.StatusBadRequest, "bad_request", "Нужны почта, пароль, и юзернейм")
+		return
+	}
+	if len(req.Password) < 8 {
+		httpx.Error(w, http.StatusBadRequest, "bad_request", "Ну ты хотя бы 8 символов сделай, это же твоя безопасность")
 		return
 	}
 
 	user, err := h.svc.Register(r.Context(), services.RegisterInput{
-		Email:     req.Email,
-		Password:  req.Password,
-		Username:  req.Username,
-		Gender:    req.Gender,
-		BirthDate: req.BirthDate,
-		City:      req.City,
+		Email:           req.Email,
+		Password:        req.Password,
+		Username:        req.Username,
+		Gender:          req.Gender,
+		BirthDate:       req.BirthDate,
+		City:            req.City,
+		ConsentAccepted: req.ConsentAccepted,
+		AgeConfirmed:    req.AgeConfirmed,
+		ConsentVersion:  req.ConsentVersion,
 	})
 
 	if err != nil {
+		if err != nil {
+			if errors.Is(err, services.ErrConsentRequired) ||
+				errors.Is(err, services.ErrAgeRequired) ||
+				errors.Is(err, services.ErrConsentVersionOld) {
+				httpx.Error(w, http.StatusBadRequest, "bad_request", err.Error())
+				return
+			}
+			if errors.Is(err, services.ErrUserExists) {
+				httpx.Error(w, http.StatusConflict, "conflict", "user already exists")
+				return
+			}
+			// ... остальное как было
+		}
 		if errors.Is(err, services.ErrUserExists) {
 			httpx.Error(w, http.StatusConflict, "conflict", "user already exists")
 			return
 		}
 		log.Error().Err(err).Msg("register failed")
-
-		msg := "failed to register"
-		if os.Getenv("APP_ENV") != "production" {
-			msg = err.Error()
-		}
-		httpx.Error(w, http.StatusInternalServerError, "internal", msg)
+		httpx.InternalError(w, err)
 		return
 	}
 
@@ -87,18 +109,24 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	accessToken, refreshToken, _, err := h.svc.Login(r.Context(), req.Email, req.Password)
 	if err != nil {
+		if errors.Is(err, services.ErrUserBanned) {
+			httpx.Error(w, http.StatusForbidden, "banned", "account is banned")
+			return
+		}
 		httpx.Error(w, http.StatusUnauthorized, "unauthorized", "invalid email or password")
 		return
 	}
 
 	// В MVP refresh токен кладем в httpOnly cookie (безопаснее для веба)
+	// Refresh-токен в httpOnly cookie: Path узкий, Secure в проде, MaxAge = RefreshTTL.
 	http.SetCookie(w, &http.Cookie{
 		Name:     "refresh_token",
 		Value:    refreshToken,
-		Path:     "/",
+		Path:     "/api/v1/auth",
 		HttpOnly: true,
-		Secure:   false, // В проде нужно true
+		Secure:   h.cfg.IsProd(),
 		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int(h.cfg.JWT.RefreshTTL.Seconds()),
 	})
 
 	httpx.JSON(w, http.StatusOK, map[string]any{
@@ -119,7 +147,7 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httpx.JSON(w, http.StatusOK, user)
+	httpx.JSON(w, http.StatusOK, toPublicUser(user))
 }
 
 func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
@@ -138,10 +166,11 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "refresh_token",
 		Value:    newRefresh,
-		Path:     "/",
+		Path:     "/api/v1/auth",
 		HttpOnly: true,
-		Secure:   false,
+		Secure:   h.cfg.IsProd(),
 		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int(h.cfg.JWT.RefreshTTL.Seconds()),
 	})
 
 	httpx.OK(w, map[string]string{"access_token": accessToken})
@@ -152,12 +181,99 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		_ = h.svc.Logout(r.Context(), cookie.Value)
 	}
+	// Удаление cookie: Name+Path+Secure+SameSite ДОЛЖНЫ совпасть с установкой,
+	// иначе браузер не удалит cookie.
 	http.SetCookie(w, &http.Cookie{
 		Name:     "refresh_token",
 		Value:    "",
-		Path:     "/",
+		Path:     "/api/v1/auth",
 		HttpOnly: true,
 		MaxAge:   -1,
+		Secure:   h.cfg.IsProd(),
+		SameSite: http.SameSiteLaxMode,
 	})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func toPublicUser(u *dbgen.User) map[string]any {
+	return map[string]any{
+		"id":                  u.ID,
+		"email":               u.Email,
+		"username":            u.Username,
+		"gender":              u.Gender,
+		"birth_date":          u.BirthDate,
+		"show_age":            u.ShowAge,
+		"city":                u.City,
+		"bio":                 u.Bio,
+		"hobbies":             u.Hobbies,
+		"telegram":            u.Telegram,
+		"vk":                  u.Vk,
+		"avatar_url":          u.AvatarUrl,
+		"role":                u.Role,
+		"username_changed_at": u.UsernameChangedAt,
+		"created_at":          u.CreatedAt,
+		"updated_at":          u.UpdatedAt,
+	}
+}
+
+// ─── Password reset ────────────────────────────────────────────────
+
+type passwordResetRequest struct {
+	Email string `json:"email"`
+}
+
+// RequestPasswordReset — POST /auth/password-reset-request.
+// Принимает email. Всегда 200 (enumeration protection).
+func (h *AuthHandler) RequestPasswordReset(w http.ResponseWriter, r *http.Request) {
+	var req passwordResetRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "bad_request", "invalid json")
+		return
+	}
+	if req.Email == "" {
+		httpx.Error(w, http.StatusBadRequest, "bad_request", "email is required")
+		return
+	}
+
+	// mailer передаётся из main.go через cfg (или поле в AuthHandler)
+	// Пока — заглушка, будем прокидывать через поле.
+	_ = h.svc.RequestPasswordReset(r.Context(), req.Email, h.mailer)
+
+	httpx.OK(w, map[string]string{
+		"message": "Если email зарегистрирован, на него отправлен код.",
+	})
+}
+
+type passwordResetConfirmRequest struct {
+	Email       string `json:"email"`
+	Code        string `json:"code"`
+	NewPassword string `json:"new_password"`
+}
+
+// ResetPassword — POST /auth/password-reset.
+func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	var req passwordResetConfirmRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "bad_request", "invalid json")
+		return
+	}
+	if req.Email == "" || req.Code == "" || req.NewPassword == "" {
+		httpx.Error(w, http.StatusBadRequest, "bad_request", "email, code, new_password required")
+		return
+	}
+
+	err := h.svc.ResetPassword(r.Context(), req.Email, req.Code, req.NewPassword)
+	if err != nil {
+		switch {
+		case errors.Is(err, services.ErrInvalidResetCode):
+			httpx.Error(w, http.StatusBadRequest, "bad_request", "Неверный или истёкший код")
+		case errors.Is(err, services.ErrTooManyAttempts):
+			httpx.Error(w, http.StatusTooManyRequests, "rate_limit", "Слишком много попыток. Подождите 15 минут.")
+		default:
+			httpx.Error(w, http.StatusBadRequest, "bad_request", err.Error())
+		}
+		return
+	}
+
+	httpx.OK(w, map[string]string{"message": "Пароль изменён. Войдите с новым паролем."})
 }

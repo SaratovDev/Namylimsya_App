@@ -11,9 +11,9 @@ import (
 )
 
 var (
-	ErrNotChatMember  = errors.New("you are not a member of this chat")
-	ErrMessageTooLong = errors.New("message is too long (max 1000 chars)")
-	ErrMessageEmpty   = errors.New("message cannot be empty")
+	ErrNotChatMember      = errors.New("you are not a member of this chat")
+	ErrChatMessageTooLong = errors.New("message is too long (max 1000 chars)")
+	ErrChatMessageEmpty   = errors.New("message cannot be empty")
 )
 
 type ChatService struct {
@@ -25,9 +25,22 @@ func NewChatService(db *dbgen.Queries) *ChatService {
 }
 
 func (s *ChatService) CanAccessChat(ctx context.Context, eventID, userID uuid.UUID) (bool, error) {
-	event, err := s.db.GetEventByID(ctx, eventID)
+	event, err := s.db.GetEventByID(ctx, dbgen.GetEventByIDParams{ID: eventID})
 	if err != nil {
 		return false, err
+	}
+	// Отменённое событие — чат закрыт для всех, включая организатора.
+	if event.Status == "cancelled" {
+		return false, nil
+	}
+	// Завершённое — тоже закрыт.
+	if event.Status == "completed" {
+		return false, nil
+	}
+	// Скрытое админом событие — чат закрыт для всех, включая организатора.
+	// Модератор скрыл событие — обсуждение не должно продолжаться.
+	if event.Hidden {
+		return false, nil
 	}
 	if event.OrganizerID == userID {
 		return true, nil
@@ -38,7 +51,9 @@ func (s *ChatService) CanAccessChat(ctx context.Context, eventID, userID uuid.UU
 	if err != nil {
 		return false, nil
 	}
-	return app.Status == "approved", nil
+	// Pending и approved — оба дают доступ к чату: люди знакомятся
+	// и обсуждают детали до одобрения. Это осознанное продуктовое решение.
+	return app.Status == "approved" || app.Status == "pending", nil
 }
 
 type SendMessageInput struct {
@@ -136,4 +151,12 @@ func (s *ChatService) UnreadCount(ctx context.Context, eventID, userID uuid.UUID
 	return s.db.CountUnreadMessages(ctx, dbgen.CountUnreadMessagesParams{
 		EventID: eventID, UserID: userID,
 	})
+}
+
+func (s *ChatService) GetUser(ctx context.Context, id uuid.UUID) (*dbgen.User, error) {
+	user, err := s.db.GetUserByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
 }

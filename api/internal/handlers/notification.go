@@ -43,7 +43,7 @@ func (h *NotificationHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	notifs, err := h.svc.List(r.Context(), userID, cursor, limit)
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal", err.Error())
+		httpx.InternalError(w, err)
 		return
 	}
 
@@ -67,7 +67,7 @@ func (h *NotificationHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.svc.MarkRead(r.Context(), id, userID); err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal", err.Error())
+		httpx.InternalError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -80,7 +80,7 @@ func (h *NotificationHandler) MarkAllRead(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if err := h.svc.MarkAllRead(r.Context(), userID); err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal", err.Error())
+		httpx.InternalError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

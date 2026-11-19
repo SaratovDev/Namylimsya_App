@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/SaratovDev/Namylimsya_App/api/internal/httpx"
@@ -56,7 +57,11 @@ func (h *ApplicationHandler) Approve(w http.ResponseWriter, r *http.Request) {
 
 	app, err := h.svc.Approve(r.Context(), appID, userID)
 	if err != nil {
-		httpx.Error(w, http.StatusForbidden, "forbidden", err.Error())
+		if errors.Is(err, services.ErrNotApplicationOwner) {
+			httpx.Error(w, http.StatusForbidden, "forbidden", err.Error())
+			return
+		}
+		httpx.Error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
 
@@ -78,7 +83,11 @@ func (h *ApplicationHandler) Reject(w http.ResponseWriter, r *http.Request) {
 
 	app, err := h.svc.Reject(r.Context(), appID, userID)
 	if err != nil {
-		httpx.Error(w, http.StatusForbidden, "forbidden", err.Error())
+		if errors.Is(err, services.ErrNotApplicationOwner) {
+			httpx.Error(w, http.StatusForbidden, "forbidden", err.Error())
+			return
+		}
+		httpx.Error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
 
@@ -107,7 +116,11 @@ func (h *ApplicationHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 
 	app, err := h.svc.Cancel(r.Context(), appID, userID, req.Reason)
 	if err != nil {
-		httpx.Error(w, http.StatusForbidden, "forbidden", err.Error())
+		if errors.Is(err, services.ErrNotApplicationOwner) {
+			httpx.Error(w, http.StatusForbidden, "forbidden", err.Error())
+			return
+		}
+		httpx.Error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
 
@@ -129,9 +142,28 @@ func (h *ApplicationHandler) ListForEvent(w http.ResponseWriter, r *http.Request
 
 	apps, err := h.svc.ListForEvent(r.Context(), eventID, userID)
 	if err != nil {
-		httpx.Error(w, http.StatusForbidden, "forbidden", err.Error())
+		if errors.Is(err, services.ErrNotApplicationOwner) {
+			httpx.Error(w, http.StatusForbidden, "forbidden", err.Error())
+			return
+		}
+		httpx.Error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
 
+	httpx.OK(w, map[string]any{"applications": apps})
+}
+
+func (h *ApplicationHandler) ListMine(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthorized", "")
+		return
+	}
+
+	apps, err := h.svc.ListByUser(r.Context(), userID)
+	if err != nil {
+		httpx.InternalError(w, err)
+		return
+	}
 	httpx.OK(w, map[string]any{"applications": apps})
 }

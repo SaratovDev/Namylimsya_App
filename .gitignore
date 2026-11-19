@@ -18,6 +18,7 @@ api/tmp/
 .env
 .env.local
 .env.*.local
+.env.production
 
 # IDE
 .vscode/
@@ -28,21 +29,18 @@ api/tmp/
 Thumbs.db
 .DS_Store
 
-# Storage (local driver)
-
-
 # Docker
 infra/data/
 
-bin/
-tmp/
+# Storage (local driver)
 /storage/
-*.exe
-*.test
-*.out
-.env
+api/storage/
+api/internal/integration/storage/
 
+# Dev artifacts (local dumps / scratch)
+project_dump.txt
+event1.json
+event2.json
+dump.sh
+dumpp.ps1
 cookies.txt
-*.jpg
-*.jpeg
-*.png

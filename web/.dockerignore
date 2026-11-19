@@ -1,0 +1,36 @@
+# Зависимости и артефакты сборки
+node_modules
+.next
+out
+build
+dist
+.turbo
+
+# Локальный конфиг — не пускаем в образ никогда
+.env
+.env.local
+.env.*.local
+.env.production
+.env.production.local
+
+# VCS и IDE
+.git
+.gitignore
+.vscode
+.idea
+*.swp
+*.swo
+
+# Документация и служебное
+README.md
+*.md
+AGENTS.md
+
+# Логи
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+Thumbs.db

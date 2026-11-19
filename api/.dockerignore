@@ -1,0 +1,34 @@
+# Бинарники и тестовые артефакты
+*.test
+*.out
+dist/
+build/
+
+# .env не копируем в образ никогда — конфиг только через env
+.env
+.env.local
+.env.*.local
+
+# VCS и IDE
+.git
+.gitignore
+.vscode
+.idea
+*.swp
+*.swo
+
+# Документация и дампы
+README.md
+*.md
+project_dump.txt
+*.txt
+
+# Миграции нужны только goose-образу, но пусть будут в контексте —
+# они маленькие, а .dockerignore с whitelist'ом сложнее читать.
+# (Если хотите строгий whitelist — можно раскомментировать:
+# *)
+# !go.mod
+# !go.sum
+# !cmd/
+# !internal/
+# !sqlc.yaml

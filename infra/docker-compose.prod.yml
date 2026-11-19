@@ -1,0 +1,186 @@
+# Production-like стек для локальной проверки.
+# Отличия от dev docker-compose.yml:
+#   - единая точка входа через Caddy (порт 80);
+#   - web и api не публикуют порты наружу (только через Caddy);
+#   - миграции запускаются отдельным one-shot сервисом;
+#   - storage — named volume, а не bind-mount.
+#
+# Запуск:
+#   cp .env.production.example .env.production
+#   # отредактируйте секреты
+#   docker compose -f infra/docker-compose.prod.yml --env-file .env.production up -d
+#
+# Логи:
+#   docker compose -f infra/docker-compose.prod.yml logs -f api
+#
+# Остановка:
+#   docker compose -f infra/docker-compose.prod.yml down
+# (данные в named volumes сохраняются; для сброса: down -v)
+
+name: namylimsya-prod
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-namylimsya}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-namylimsya}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-namylimsya} -d ${POSTGRES_DB:-namylimsya}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - internal
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - internal
+
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    # Для локальной проверки. В настоящем проде удалите этот сервис
+    # и поставьте реальный SMTP в .env.production.
+    ports:
+      - "8025:8025"
+    networks:
+      - internal
+
+  migrate:
+    image: namylimsya-api:dev
+    restart: "no"
+    entrypoint: ["/app/goose"]
+    command:
+      - "-dir"
+      - "/app/migrations"
+      - "postgres"
+      - "postgres://${POSTGRES_USER:-namylimsya}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-namylimsya}?sslmode=disable"
+      - "up"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - internal
+
+  api:
+    image: namylimsya-api:dev
+    restart: unless-stopped
+    environment:
+      # production: включаем все прод-валидации. PUBLIC_BASE_URL —
+      # https://localhost (Caddy local_certs), проходит HTTPS-проверку.
+      # JWT-секреты в .env.production — 32+ символа, разные (иначе fail).
+      APP_ENV: production
+      HTTP_PORT: "8080"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://localhost}
+      # За Caddy: доверяем XFF от private peer'ов (Docker bridge 172.x.x.x).
+      TRUSTED_PROXY: "true"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-namylimsya}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-namylimsya}?sslmode=disable"
+      REDIS_URL: "redis://redis:6379/0"
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-720h}
+      SMTP_ENABLED: ${SMTP_ENABLED:-false}
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-noreply@namylimsya.local}
+      EMAIL_VERIFICATION_ENABLED: ${EMAIL_VERIFICATION_ENABLED:-false}
+      STORAGE_DRIVER: local
+      STORAGE_LOCAL_PATH: /app/storage
+      STORAGE_PUBLIC_BASE_URL: ${STORAGE_PUBLIC_BASE_URL:-http://localhost}
+      YANDEX_MAPS_API_KEY: ${YANDEX_MAPS_API_KEY:-}
+    volumes:
+      - storage_data:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/api/v1/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - internal
+
+  web:
+    image: namylimsya-web:prod-local
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+    depends_on:
+      api:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - internal
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      # Домен для Caddyfile ({$DOMAIN:localhost}). При публичном запуске
+      # задайте DOMAIN=<домен> в .env.production и уберите local_certs.
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  pgdata:
+  redisdata:
+  storage_data:
+  caddy_data:
+  caddy_config:

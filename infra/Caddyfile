@@ -1,0 +1,76 @@
+# Production-like reverse-proxy для локальной проверки «как в проде».
+#
+# TLS: local_certs — Caddy использует встроенный Local CA для подписи.
+# Сертификат самоподписанный → браузер ругается при первом заходе.
+# Принять один раз: «Advanced → Proceed to localhost».
+#
+# Домен берётся из env DOMAIN (см. docker-compose.prod.yml), по умолчанию
+# localhost. В реальном проде: уберите { local_certs }, задайте DOMAIN=<домен>,
+# PUBLIC_BASE_URL=https://<домен> — Caddy сам получит Let's Encrypt сертификат.
+#
+# C5 (log без ?token): Caddy access log для этого host'а НЕ включён.
+# Дефолтные логи Caddy (старт, ошибки, TLS) идут в stdout. Токен теперь
+# в Sec-WebSocket-Protocol, а не в query — access log не палит его.
+#
+# Маршрутизация:
+#   /api/*    → API (REST)
+#   /ws/*     → API (WebSocket) — с header_down Sec-WebSocket-Protocol
+#   /static/* → API (загруженные файлы)
+#   /*        → Web (Next.js)
+
+{
+	# local_certs — самоподписанный сертификат для локальной проверки.
+	# Перед публичным запуском УБЕРИТЕ эту строку и задайте реальный домен
+	# (env DOMAIN): Caddy сам получит Let's Encrypt сертификат.
+	local_certs
+}
+
+{$DOMAIN:localhost} {
+	encode gzip zstd
+
+	# header_up X-Forwarded-For {remote_host} — перезаписываем XFF
+	# реальным peer'ом (клиент→Caddy), НЕ пропускаем клиентский XFF.
+	# Без этого атакующий подделывает XFF и обходит IP-rate-limit.
+	# Caddy warning «Unnecessary header_up X-Forwarded-For» — косметический:
+	# поведение по умолчанию append (spoofing возможен), явный header_up
+	# перезаписывает (spoofing невозможен).
+
+	handle /api/* {
+		reverse_proxy api:8080 {
+			# Один proxy-хоп: ЗАМЕНЯЕМ XFF на сокет-IP клиента, которого видит Caddy.
+			# Дефолт Caddy — append: client-supplied значения остаются слева в цепочке.
+			header_up X-Forwarded-For {remote_host}
+
+			# Go эти заголовки больше не читает — но вычищаем на edge, чтобы
+			# в логи и будущие обработчики не попал client-supplied мусор.
+			header_up -X-Real-IP
+			header_up -True-Client-IP
+		}
+	}
+
+	# WebSocket: Caddy reverse_proxy НЕ пробрасывает Sec-WebSocket-Protocol
+	# от upstream к клиенту по умолчанию. Без header_down браузер видит:
+	# «я попросил ["bearer", "<jwt>"], сервер не вернул ни одного» →
+	# WebSocket connection failed без кода. У нас единственный subprotocol
+	# "bearer" — прописываем жёстко.
+
+	handle /ws/* {
+		reverse_proxy api:8080 {
+			header_up X-Forwarded-For {remote_host}
+			header_up -X-Real-IP
+			header_up -True-Client-IP
+			header_down Sec-WebSocket-Protocol bearer
+		}
+	}
+
+	handle /static/* {
+		reverse_proxy api:8080 {
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+}

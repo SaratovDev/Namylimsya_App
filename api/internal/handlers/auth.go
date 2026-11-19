@@ -270,6 +270,17 @@ func (h *AuthHandler) ResendVerification(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Анти-спам: не чаще 1 раза в 60 сек на юзера.
+	allowed, err := h.svc.ThrottleVerificationResend(r.Context(), userID)
+	if err != nil {
+		httpx.InternalError(w, err)
+		return
+	}
+	if !allowed {
+		httpx.Error(w, http.StatusTooManyRequests, "rate_limit", "Слишком часто. Подождите минуту.")
+		return
+	}
+
 	token, err := h.svc.CreateVerificationToken(r.Context(), userID)
 	if err != nil {
 		httpx.InternalError(w, err)

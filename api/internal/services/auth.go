@@ -351,6 +351,11 @@ func (s *AuthService) CreateVerificationToken(ctx context.Context, userID uuid.U
 	return token, nil
 }
 
+// ThrottleVerificationResend — анти-спам: не чаще 1 раза в 60 сек на юзера.
+func (s *AuthService) ThrottleVerificationResend(ctx context.Context, userID uuid.UUID) (bool, error) {
+	return s.rdbSetNX(ctx, "verify:throttle:"+userID.String(), "1", 60*time.Second)
+}
+
 // VerifyEmail — по токену из письма подтверждает email и удаляет токен.
 func (s *AuthService) VerifyEmail(ctx context.Context, token string) error {
 	token = strings.TrimSpace(token)

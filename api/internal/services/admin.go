@@ -271,8 +271,16 @@ func (s *AdminService) BanUser(
 				}
 			}
 			_ = s.sm.MarkBanned(ctx, userID, ttl)
+			if err := s.sm.MarkBanned(ctx, userID, ttl); err != nil {
+				log.Warn().Err(err).Str("user_id", userID.String()).
+					Msg("failed to set ban flag in redis")
+			}
 		} else {
 			_ = s.sm.ClearBanned(ctx, userID)
+			if err := s.sm.ClearBanned(ctx, userID); err != nil {
+				log.Warn().Err(err).Str("user_id", userID.String()).
+					Msg("failed to clear ban flag in redis")
+			}
 		}
 	}
 

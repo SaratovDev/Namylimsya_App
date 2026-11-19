@@ -1,36 +1,63 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# web — фронтенд «Намылимся»
 
-## Getting Started
+Next.js 16 (App Router, standalone) + React 19 + Tailwind v4 + shadcn/ui. Общается с Go-бэкендом (`../api`) через REST и WebSocket.
 
-First, run the development server:
+## Быстрый старт (dev)
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
+pnpm dev          # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Бэкенд должен быть поднят на `http://localhost:8080` (см. корневой `README.md`).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Переменные окружения
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Скопируйте `.env.example` → `.env.local` и заполните:
 
-## Learn More
+| Переменная | Пример (dev) | Обязательна? | Описание |
+|---|---|---|---|
+| `NEXT_PUBLIC_API_URL` | `http://localhost:8080/api/v1` | да, на сборку | Базовый URL API. В проде — `/api/v1` (через Caddy). **Вкомпилируется в бандл на `next build`** |
+| `NEXT_PUBLIC_WS_URL` | `ws://localhost:8080/ws` | да, на сборку | WebSocket URL. В проде — `wss://<домен>/ws` |
+| `NEXT_PUBLIC_YANDEX_MAPS_API_KEY` | — | нет | Ключ Яндекс.Карт (сейчас карта на OSM/Photon) |
+| `NEXT_PUBLIC_EMAIL_VERIFICATION_ENABLED` | `true`/`false` | нет | Показывать ли баннер «подтвердите email». Должен совпадать с `EMAIL_VERIFICATION_ENABLED` на бэке |
 
-To learn more about Next.js, take a look at the following resources:
+Важно: `NEXT_PUBLIC_*` читаются **только на этапе сборки** и вкомпиливаются в бандл. В Docker — передавайте через `--build-arg` (см. `web/Dockerfile`); без них `next.config.ts` упадёт на сборке.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Сборка и запуск в проде
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+# Standalone-сборка
+NEXT_PUBLIC_API_URL=/api/v1 \
+NEXT_PUBLIC_WS_URL=wss://localhost/ws \
+pnpm build
 
-## Deploy on Vercel
+pnpm start        # Node.js standalone-сервер на :3000
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Либо через Docker (см. `../infra/docker-compose.prod.yml`):
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+docker build \
+  --build-arg NEXT_PUBLIC_API_URL=/api/v1 \
+  --build-arg NEXT_PUBLIC_WS_URL=wss://localhost/ws \
+  --build-arg NEXT_PUBLIC_EMAIL_VERIFICATION_ENABLED=true \
+  -f web/Dockerfile web/
+```
+
+## Тесты
+
+```bash
+pnpm lint                    # ESLint
+pnpm exec tsc --noEmit       # типы
+pnpm test:e2e                # Playwright (нужен поднятый prod-like стек на https://localhost)
+```
+
+## Структура
+
+```
+app/          роуты (App Router): (app) — основное приложение, (auth) — login/register, (public) — privacy/terms, admin — админка
+components/   UI-компоненты (event-*, ui/ — shadcn-обёртки)
+lib/          apiFetch, auth-context, хуки (use-chat, use-notifications), типы
+e2e/          Playwright-тесты
+```

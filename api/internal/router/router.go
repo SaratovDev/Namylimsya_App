@@ -105,19 +105,29 @@ func New(deps Deps) chi.Router {
 			r.Post("/support/tickets", deps.Support.CreateTicket)
 		})
 
-		// Auth — защищаем rate-limit'ом по IP (10 запросов / минуту).
-		// Без RL (nil) — работаем без ограничения (в тестах, если не прокинут).
+		// Auth — rate-limit по IP. Brute-force-чувствительные (register/login/
+		// password-reset) — 10/мин/IP. refresh/logout/verify-email — НЕ brute-
+		// force: refresh требует валидный подписанный токен, verify одноразовый,
+		// поэтому у них отдельный либеральный лимит (иначе активная навигация с
+		// refresh на каждую загрузку страницы ловит 429 и ломает сессии).
 		api.Route("/auth", func(r chi.Router) {
-			if deps.RL != nil {
-				r.Use(custommw.IPRateLimit(deps.RL, "auth_ip:", 10, time.Minute, false))
-			}
-			r.Post("/register", deps.Auth.Register)
-			r.Post("/login", deps.Auth.Login)
-			r.Post("/refresh", deps.Auth.Refresh)
-			r.Post("/logout", deps.Auth.Logout)
-			r.Post("/password-reset-request", deps.Auth.RequestPasswordReset)
-			r.Post("/password-reset", deps.Auth.ResetPassword)
-			r.Get("/verify-email", deps.Auth.VerifyEmail)
+			r.Group(func(r chi.Router) {
+				if deps.RL != nil {
+					r.Use(custommw.IPRateLimit(deps.RL, "auth_ip:", 10, time.Minute, false))
+				}
+				r.Post("/register", deps.Auth.Register)
+				r.Post("/login", deps.Auth.Login)
+				r.Post("/password-reset-request", deps.Auth.RequestPasswordReset)
+				r.Post("/password-reset", deps.Auth.ResetPassword)
+			})
+			r.Group(func(r chi.Router) {
+				if deps.RL != nil {
+					r.Use(custommw.IPRateLimit(deps.RL, "auth_refresh_ip:", 120, time.Minute, true))
+				}
+				r.Post("/refresh", deps.Auth.Refresh)
+				r.Post("/logout", deps.Auth.Logout)
+				r.Get("/verify-email", deps.Auth.VerifyEmail)
+			})
 		})
 
 		// --- Защищённые (AuthRequired) ---

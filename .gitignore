@@ -39,6 +39,7 @@ api/internal/integration/storage/
 
 # Dev artifacts (local dumps / scratch)
 project_dump.txt
+new_p_dump.txt
 event1.json
 event2.json
 dump.sh

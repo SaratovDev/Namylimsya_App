@@ -1,26 +1,203 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@custom-variant dark (&:is(.dark *));
 
 @theme inline {
+  --font-sans: var(--font-manrope);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-brand-blue: var(--brand-blue);
+  --color-brand-red: var(--brand-red);
+  --color-brand-amber: var(--brand-amber);
+  --color-brand-orange: var(--brand-orange);
+  --color-brand-cream: var(--brand-cream);
+  --color-brand-black: var(--brand-black);
+  --color-brand-green: var(--brand-green);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* ─────────────────────────────────────────────────────────────────────
+   СВЕТЛАЯ ТЕМА
+   Снежный белый фон, глубокий чёрный текст, оранжевое золото CTA.
+   ───────────────────────────────────────────────────────────────────── */
+:root {
+  --background: #F7F7F2;            /* белый снежный */
+  --foreground: #010105;            /* глубокий чёрный */
+  --card: #FFFFFF;
+  --card-foreground: #010105;
+  --popover: #FFFFFF;
+  --popover-foreground: #010105;
+
+  --primary: #e65f11;               /* оранжевое золото — CTA */
+  --primary-foreground: #010105;    /* на золоте — чёрный для контраста */
+
+  --secondary: #360B8C;             /* индиго — secondary кнопки */
+  --secondary-foreground: #F7F7F2;
+
+  --muted: #EDEDE4;                 /* мягкий серо-бежевый */
+  --muted-foreground: #5A5A55;
+
+  --accent: #360B8C;                /* индиго — hover, active, подсветки */
+  --accent-foreground: #F7F7F2;
+
+  --destructive: #E40F0F;           /* красный */
+  --destructive-foreground: #F7F7F2;
+
+  --border: #D8D8CE;                /* тёплая граница */
+  --input: #D8D8CE;
+  --ring: #CA0C48;                  /* focus-ring — фиолетовый розовый */
+
+  /* Брендовые цвета (для акцентов/иконок, не для текста/фонов) */
+  --brand-blue: #360B8C;            /* индиго (легаси-имя, чтобы не ломать) */
+  --brand-red: #E40F0F;
+  --brand-amber: #CF9100;
+  --brand-orange: #CF9100;
+  --brand-cream: #F7F7F2;
+  --brand-black: #010105;
+  --brand-green: #069812;
+
+  --radius: .75rem;
+  --chart-1: #CF9100;
+  --chart-2: #360B8C;
+  --chart-3: #CA0C48;
+  --chart-4: #E40F0F;
+  --chart-5: #069812;
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   ТЁМНАЯ ТЕМА
+   Глубокий чёрный фон, матовый оникс карточки, оранжевое золото CTA.
+   ───────────────────────────────────────────────────────────────────── */
+.dark {
+  --background: #010105;            /* глубокий чёрный */
+  --foreground: #F7F7F2;            /* белый снежный */
+
+  --card: #050505;                  /* матовый оникс */
+  --card-foreground: #F7F7F2;
+
+  --popover: #050505;
+  --popover-foreground: #F7F7F2;
+
+  --primary: rgb(232, 99, 10);               /* оранжевое золото */
+  --primary-foreground: #F7F7F2;    /* чёрный на золоте */
+
+  --secondary: #360B8C;             /* индиго */
+  --secondary-foreground: #F7F7F2;
+
+  --muted: #1A1A1A;                 /* очень тёмный серый */
+  --muted-foreground: #9A9A95;
+
+  --accent: #360B8C;                /* индиго — hover, active */
+  --accent-foreground: #F7F7F2;
+
+  --destructive: #E40F0F;
+  --destructive-foreground: #F7F7F2;
+
+  --border: #2A2A2A;                /* тонкая граница на чёрном */
+  --input: #2A2A2A;
+  --ring: #CA0C48;                  /* focus — фиолетовый розовый */
+
+  --brand-blue: #360B8C;
+  --brand-red: #E40F0F;
+  --brand-amber: #CF9100;
+  --brand-orange: #CF9100;
+  --brand-cream: #F7F7F2;
+  --brand-black: #010105;
+  --brand-green: #069812;
+
+  --chart-1: #CF9100;
+  --chart-2: #360B8C;
+  --chart-3: #CA0C48;
+  --chart-4: #E40F0F;
+  --chart-5: #069812;
+}
+
+@layer base {
+  
+  * {
+    @apply border-border outline-ring/50;
   }
+
+  @layer utilities {
+  .bg-cta-gradient {
+    background: linear-gradient(135deg, #CF9100 0%, #CA0C48 100%);
+    color: #F7F7F2;
+  }
+  .bg-cta-gradient:hover {
+    filter: brightness(1.1);
+  }
+    .status-pending {
+    border-color: rgba(6, 152, 18, 0.3);
+    background-color: rgba(6, 152, 18, 0.08);
+    color: #069812;
+  }
+  .dark .status-pending {
+    background-color: rgba(6, 152, 18, 0.12);
+    color: #4ADE80;
+  }
+
+    .status-approved {
+    border-color: rgba(6, 152, 18, 0.5);
+    background-color: #069812;
+    color: #F7F7F2;
+  }
+  .status-approved:hover {
+    background-color: #058B10;
+  }
+
+    /* Тени по Stageshow */
+  .shadow-hero {
+    box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.5);
+  }
+  .shadow-window {
+    box-shadow: 0 12px 24px -8px rgba(0, 0, 0, 0.4);
+  }
+  .shadow-satellite {
+    box-shadow: 0 8px 16px -4px rgba(0, 0, 0, 0.5);
+  }
+  .shadow-ground {
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05), 0 4px 12px -2px rgba(0, 0, 0, 0.3);
+  }
+  .shadow-float {
+    box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.6);
+  }
+  
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+    transition: background-color 0.2s, color 0.2s;
+  }
+
+  html {
+    @apply font-sans;
+  }
+
+  .leaflet-container {
+    font-family: inherit;
+    z-index: 0;
+  }
 }

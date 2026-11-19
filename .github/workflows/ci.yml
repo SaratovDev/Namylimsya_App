@@ -30,7 +30,7 @@ jobs:
         options: >-
           --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
     env:
-      APP_ENV: test
+      APP_ENV: development
       HTTP_PORT: "8080"
       DATABASE_URL: postgres://namylimsya:devpass@localhost:5432/namylimsya?sslmode=disable
       REDIS_URL: redis://localhost:6379/0
@@ -40,10 +40,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-
-      
         with:
-          go-version: "1.22"
+          go-version: "1.27"
           cache-dependency-path: api/go.sum
 
       - name: Install goose
@@ -84,3 +82,4 @@ jobs:
       - run: pnpm build
         env:
           NEXT_PUBLIC_API_URL: "http://localhost:8080/api/v1"
+          NEXT_PUBLIC_WS_URL: "ws://localhost:8080/ws"

@@ -31,6 +31,8 @@ func mapAppErr(w http.ResponseWriter, err error) {
 	case errors.Is(err, services.ErrCannotApplyToOwnEvent),
 		errors.Is(err, services.ErrApplicationExists),
 		errors.Is(err, services.ErrTooManyApplications),
+		errors.Is(err, services.ErrApplicationNotPending),
+		errors.Is(err, services.ErrApplicationNotCancellable),
 		errors.Is(err, services.ErrEventFull),
 		errors.Is(err, services.ErrEventNotActive),
 		errors.Is(err, services.ErrEventHidden),

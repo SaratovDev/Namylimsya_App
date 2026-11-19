@@ -22,6 +22,8 @@ var (
 	ErrEventNotActive        = errors.New("Событие не активно")
 	ErrEventHidden           = errors.New("Событие недоступно")
 	ErrNotApplicationOwner   = errors.New("Нельзя")
+	ErrApplicationNotPending = errors.New("Заявка уже обработана")
+	ErrApplicationNotCancellable = errors.New("Заявку нельзя отменить в текущем статусе")
 )
 
 type ApplicationService struct {
@@ -206,7 +208,7 @@ func (s *ApplicationService) Approve(ctx context.Context, applicationID, organiz
 		return nil, ErrEventNotActive
 	}
 	if app.Status != "pending" {
-		return nil, errors.New("application is not pending")
+		return nil, ErrApplicationNotPending
 	}
 
 	approved, err := qtx.CountApprovedApplicationsForEvent(ctx, app.EventID)
@@ -226,7 +228,7 @@ func (s *ApplicationService) Approve(ctx context.Context, applicationID, organiz
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Статус изменился между перечитыванием и UPDATE (редкий, но
 			// возможный случай: Reject без lock).
-			return nil, errors.New("application is not pending")
+			return nil, ErrApplicationNotPending
 		}
 		return nil, err
 	}
@@ -269,7 +271,7 @@ func (s *ApplicationService) Reject(ctx context.Context, applicationID, organize
 		return nil, ErrNotApplicationOwner
 	}
 	if app.Status != "pending" {
-		return nil, errors.New("application is not pending")
+		return nil, ErrApplicationNotPending
 	}
 
 	updated, err := s.db.UpdateApplicationStatus(ctx, dbgen.UpdateApplicationStatusParams{
@@ -279,7 +281,7 @@ func (s *ApplicationService) Reject(ctx context.Context, applicationID, organize
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, errors.New("application is not pending")
+			return nil, ErrApplicationNotPending
 		}
 		return nil, err
 	}
@@ -314,7 +316,7 @@ func (s *ApplicationService) Cancel(ctx context.Context, applicationID, userID u
 		return nil, ErrNotApplicationOwner
 	}
 	if app.Status != "pending" && app.Status != "approved" {
-		return nil, errors.New("cannot cancel application in current state")
+		return nil, ErrApplicationNotCancellable
 	}
 
 	var reasonPtr *string
@@ -330,7 +332,7 @@ func (s *ApplicationService) Cancel(ctx context.Context, applicationID, userID u
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, errors.New("cannot cancel application in current state")
+			return nil, ErrApplicationNotCancellable
 		}
 		return nil, err
 	}

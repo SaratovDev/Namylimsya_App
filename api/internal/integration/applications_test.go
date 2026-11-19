@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"net/url"
 	"testing"
 	"time"
 
@@ -46,15 +47,13 @@ func TestApplicationsFlow(t *testing.T) {
 		method: "POST", path: "/api/v1/events/" + eventID + "/applications", token: applicantToken,
 	})
 	require.Equal(t, 400, dupResp.Status)
-	require.Contains(t, dupResp.Body["message"], "already exists")
-
+	require.Contains(t, dupResp.Body["message"], "уже отправлена заяка")
 	// 5. Тест 3: на своё событие — 400
 	ownResp := env.srv.do(t, httpReq{
 		method: "POST", path: "/api/v1/events/" + eventID + "/applications", token: organizerToken,
 	})
 	require.Equal(t, 400, ownResp.Status)
-	require.Contains(t, ownResp.Body["message"], "own event")
-
+	require.Contains(t, ownResp.Body["message"], "зачем на него заявляться")
 	// 6. Тест 4a: организатор видит заявки — 200
 	listResp := env.srv.do(t, httpReq{
 		method: "GET", path: "/api/v1/events/" + eventID + "/applications", token: organizerToken,
@@ -144,12 +143,11 @@ func TestHiddenLocation(t *testing.T) {
 	})
 	require.Equal(t, false, pendingResp.Body["can_see_exact_location"])
 
-	// Одобряем — видит адрес
-	// Нужно получить appID: список от организатора
+	// Одобряем
 	listResp := env.srv.do(t, httpReq{
 		method: "GET", path: "/api/v1/events/" + eventID + "/applications", token: organizerToken,
 	})
-	apps := listResp.Body["applications"].([]any) // ВНИМАНИЕ: в вашем ответе может быть другой ключ
+	apps := listResp.Body["applications"].([]any)
 	appID := apps[0].(map[string]any)["id"].(string)
 
 	env.srv.do(t, httpReq{
@@ -160,6 +158,21 @@ func TestHiddenLocation(t *testing.T) {
 	})
 	require.Equal(t, true, approvedResp.Body["can_see_exact_location"])
 	require.NotNil(t, approvedResp.Body["address"])
+
+	// Гость: lat/lng присутствуют, но маскированы (не совпадают с точными).
+	latGuest, _ := guestResp.Body["lat"].(float64)
+	lngGuest, _ := guestResp.Body["lng"].(float64)
+	require.NotZero(t, latGuest, "guest must receive masked lat")
+	require.NotZero(t, lngGuest, "guest must receive masked lng")
+	require.NotEqual(t, 51.53, latGuest, "guest lat must be masked")
+	require.NotEqual(t, 46.03, lngGuest, "guest lng must be masked")
+	require.Nil(t, guestResp.Body["address"])
+
+	// Approved: точные координаты.
+	latAppr, _ := approvedResp.Body["lat"].(float64)
+	lngAppr, _ := approvedResp.Body["lng"].(float64)
+	require.InDelta(t, 51.53, latAppr, 1e-6, "approved must see exact lat")
+	require.InDelta(t, 46.03, lngAppr, 1e-6, "approved must see exact lng")
 }
 
 func TestEventLimits(t *testing.T) {
@@ -192,7 +205,7 @@ func TestEventLimits(t *testing.T) {
 		},
 	})
 	require.Equal(t, 400, thirdResp.Status)
-	require.Contains(t, thirdResp.Body["message"], "cannot have more than 2 active events")
+	require.Contains(t, thirdResp.Body["message"], "Больше двух активных событий не создать")
 }
 
 func TestApplicationLimit(t *testing.T) {
@@ -201,10 +214,6 @@ func TestApplicationLimit(t *testing.T) {
 
 	organizerToken := env.registerAndLogin(t, uniqueEmail("org_applimit"), "oa_"+shortID())
 	userToken := env.registerAndLogin(t, uniqueEmail("user_applimit"), "ua_"+shortID())
-
-	// Создаём 4 события (2 организатора, по 2 каждый — лимит организатора)
-	// Проще: используем одного организатора, отменяем старое? Нет.
-	// Создадим 2 события от organizer1 и 2 от organizer2.
 	organizer2Token := env.registerAndLogin(t, uniqueEmail("org2_applimit"), "o2_"+shortID())
 
 	eventIDs := []string{}
@@ -233,7 +242,6 @@ func TestApplicationLimit(t *testing.T) {
 		eventIDs = append(eventIDs, resp.Body["id"].(string))
 	}
 
-	// user подаёт 3 заявки — ок
 	for i := 0; i < 3; i++ {
 		resp := env.srv.do(t, httpReq{
 			method: "POST", path: "/api/v1/events/" + eventIDs[i] + "/applications", token: userToken,
@@ -241,10 +249,86 @@ func TestApplicationLimit(t *testing.T) {
 		require.Equal(t, 201, resp.Status, resp.Raw)
 	}
 
-	// 4-я — 400
 	resp := env.srv.do(t, httpReq{
 		method: "POST", path: "/api/v1/events/" + eventIDs[3] + "/applications", token: userToken,
 	})
 	require.Equal(t, 400, resp.Status)
-	require.Contains(t, resp.Body["message"], "cannot have more than 3 active applications")
+	require.Contains(t, resp.Body["message"], "Больше трех заявок")
+}
+
+func TestHiddenLocationFeed(t *testing.T) {
+	env := newTestEnv(t)
+	defer env.cleanup()
+
+	orgToken := env.registerAndLogin(t, uniqueEmail("org_hlf"), "ohlf_"+shortID())
+	approvedToken := env.registerAndLogin(t, uniqueEmail("appr_hlf"), "aprh_"+shortID())
+
+	// Уникальный city — чтобы не зависеть от событий прошлых тестов и пагинации.
+	// ОДИН на весь тест, не внутри findInFeed.
+	uniqueCity := "Саратов-" + shortID()
+
+	eventResp := env.srv.do(t, httpReq{
+		method: "POST", path: "/api/v1/events", token: orgToken,
+		body: map[string]any{
+			"title": "Hidden feed", "category": "прогулки",
+			"starts_at": futureTime(24 * time.Hour).Format(time.RFC3339),
+			"city":      uniqueCity, "address": "Точный адрес",
+			"lat": 51.5300, "lng": 46.0300,
+			"hide_exact_location": true,
+		},
+	})
+	require.Equal(t, 201, eventResp.Status, eventResp.Raw)
+	eventID := eventResp.Body["id"].(string)
+
+	applyResp := env.srv.do(t, httpReq{
+		method: "POST", path: "/api/v1/events/" + eventID + "/applications", token: approvedToken,
+	})
+	require.Equal(t, 201, applyResp.Status, applyResp.Raw)
+	appID := applyResp.Body["id"].(string)
+	approveResp := env.srv.do(t, httpReq{
+		method: "PATCH", path: "/api/v1/applications/" + appID + "/approve", token: orgToken,
+	})
+	require.Equal(t, 200, approveResp.Status, approveResp.Raw)
+
+	findInFeed := func(token string) map[string]any {
+		resp := env.srv.do(t, httpReq{
+			method: "GET",
+			path:   "/api/v1/events?city=" + url.QueryEscape(uniqueCity),
+			token:  token,
+		})
+		require.Equal(t, 200, resp.Status, resp.Raw)
+		for _, e := range resp.Body["events"].([]any) {
+			m := e.(map[string]any)
+			if m["id"] == eventID {
+				return m
+			}
+		}
+		t.Fatalf("event %s not found in feed (city=%s)", eventID, uniqueCity)
+		return nil
+	}
+
+	guest := findInFeed("")
+	require.Equal(t, false, guest["can_see_exact_location"])
+	require.Nil(t, guest["address"])
+	latGuest, _ := guest["lat"].(float64)
+	lngGuest, _ := guest["lng"].(float64)
+	require.NotZero(t, latGuest)
+	require.NotZero(t, lngGuest)
+	require.NotEqual(t, 51.5300, latGuest)
+	require.NotEqual(t, 46.0300, lngGuest)
+
+	appr := findInFeed(approvedToken)
+	require.Equal(t, true, appr["can_see_exact_location"])
+	require.Equal(t, "Точный адрес", appr["address"])
+	latAppr, _ := appr["lat"].(float64)
+	lngAppr, _ := appr["lng"].(float64)
+	require.InDelta(t, 51.5300, latAppr, 1e-6)
+	require.InDelta(t, 46.0300, lngAppr, 1e-6)
+
+	org := findInFeed(orgToken)
+	require.Equal(t, true, org["can_see_exact_location"])
+	latOrg, _ := org["lat"].(float64)
+	lngOrg, _ := org["lng"].(float64)
+	require.InDelta(t, 51.5300, latOrg, 1e-6)
+	require.InDelta(t, 46.0300, lngOrg, 1e-6)
 }

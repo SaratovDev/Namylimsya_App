@@ -162,6 +162,10 @@ type RegisterInput struct {
 }
 
 func (s *AuthService) Register(ctx context.Context, input RegisterInput) (*dbgen.User, error) {
+	// Нормализация email: иначе "Foo@Bar.com" и "foo@bar.com" — разные аккаунты,
+	// а reset (который нормализует) не найдёт пользователя → перманентный локаут.
+	input.Email = strings.ToLower(strings.TrimSpace(input.Email))
+
 	if !input.ConsentAccepted {
 		return nil, ErrConsentRequired
 	}
@@ -220,6 +224,8 @@ func (s *AuthService) Register(ctx context.Context, input RegisterInput) (*dbgen
 }
 
 func (s *AuthService) Login(ctx context.Context, email, password string) (string, string, *dbgen.User, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+
 	user, err := s.db.GetUserByEmail(ctx, email)
 	if err != nil {
 		return "", "", nil, ErrInvalidCreds

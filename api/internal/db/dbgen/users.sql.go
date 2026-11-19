@@ -15,19 +15,23 @@ import (
 
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (
-    email, password_hash, username, gender, birth_date, city
+    email, password_hash, username, gender, birth_date, city,
+    consent_at, consent_version, age_confirmed_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6
-) RETURNING id, email, password_hash, username, gender, birth_date, show_age, city, bio, hobbies, telegram, vk, avatar_url, role, is_banned, ban_reason, email_verified, created_at, updated_at
+    $1, $2, $3, $4, $5, $6, $7, $8, $9
+) RETURNING id, email, password_hash, username, gender, birth_date, show_age, city, bio, hobbies, telegram, vk, avatar_url, role, is_banned, ban_reason, email_verified, created_at, updated_at, consent_at, consent_version, age_confirmed_at, ban_expires_at, username_changed_at
 `
 
 type CreateUserParams struct {
-	Email        string      `json:"email"`
-	PasswordHash string      `json:"password_hash"`
-	Username     string      `json:"username"`
-	Gender       *string     `json:"gender"`
-	BirthDate    pgtype.Date `json:"birth_date"`
-	City         *string     `json:"city"`
+	Email          string      `json:"email"`
+	PasswordHash   string      `json:"password_hash"`
+	Username       string      `json:"username"`
+	Gender         *string     `json:"gender"`
+	BirthDate      pgtype.Date `json:"birth_date"`
+	City           *string     `json:"city"`
+	ConsentAt      *time.Time  `json:"consent_at"`
+	ConsentVersion *string     `json:"consent_version"`
+	AgeConfirmedAt *time.Time  `json:"age_confirmed_at"`
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
@@ -38,6 +42,9 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		arg.Gender,
 		arg.BirthDate,
 		arg.City,
+		arg.ConsentAt,
+		arg.ConsentVersion,
+		arg.AgeConfirmedAt,
 	)
 	var i User
 	err := row.Scan(
@@ -60,6 +67,11 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.EmailVerified,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ConsentAt,
+		&i.ConsentVersion,
+		&i.AgeConfirmedAt,
+		&i.BanExpiresAt,
+		&i.UsernameChangedAt,
 	)
 	return i, err
 }
@@ -104,8 +116,76 @@ func (q *Queries) GetPublicUser(ctx context.Context, id uuid.UUID) (GetPublicUse
 	return i, err
 }
 
+const getPublicUserFull = `-- name: GetPublicUserFull :one
+SELECT
+    u.id, u.username, u.gender, u.birth_date, u.show_age, u.city, u.bio,
+    u.hobbies, u.avatar_url, u.role, u.is_banned, u.created_at, u.updated_at,
+    (
+        SELECT COUNT(*) FROM events e
+        WHERE e.organizer_id = u.id
+          AND e.status = 'completed'
+          AND EXISTS (
+              SELECT 1 FROM applications a
+              WHERE a.event_id = e.id AND a.status = 'approved'
+          )
+    )::bigint AS organized_count,
+    (
+        SELECT COUNT(*) FROM applications a
+        JOIN events e ON e.id = a.event_id
+        WHERE a.user_id = u.id
+          AND a.status = 'approved'
+          AND e.status = 'completed'
+    )::bigint AS attended_count
+FROM users u
+WHERE u.id = $1
+`
+
+type GetPublicUserFullRow struct {
+	ID             uuid.UUID   `json:"id"`
+	Username       string      `json:"username"`
+	Gender         *string     `json:"gender"`
+	BirthDate      pgtype.Date `json:"birth_date"`
+	ShowAge        bool        `json:"show_age"`
+	City           *string     `json:"city"`
+	Bio            *string     `json:"bio"`
+	Hobbies        []string    `json:"hobbies"`
+	AvatarUrl      *string     `json:"avatar_url"`
+	Role           string      `json:"role"`
+	IsBanned       bool        `json:"is_banned"`
+	CreatedAt      time.Time   `json:"created_at"`
+	UpdatedAt      time.Time   `json:"updated_at"`
+	OrganizedCount int64       `json:"organized_count"`
+	AttendedCount  int64       `json:"attended_count"`
+}
+
+// Расширенный публичный профиль: базовые поля + счётчики + роль/бан.
+// Используется на /users/[id]. Старый GetPublicUser оставляем для
+// мест, где counts не нужны (пока таких нет, но не ломаем API).
+func (q *Queries) GetPublicUserFull(ctx context.Context, id uuid.UUID) (GetPublicUserFullRow, error) {
+	row := q.db.QueryRow(ctx, getPublicUserFull, id)
+	var i GetPublicUserFullRow
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.Gender,
+		&i.BirthDate,
+		&i.ShowAge,
+		&i.City,
+		&i.Bio,
+		&i.Hobbies,
+		&i.AvatarUrl,
+		&i.Role,
+		&i.IsBanned,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OrganizedCount,
+		&i.AttendedCount,
+	)
+	return i, err
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, username, gender, birth_date, show_age, city, bio, hobbies, telegram, vk, avatar_url, role, is_banned, ban_reason, email_verified, created_at, updated_at FROM users WHERE email = $1
+SELECT id, email, password_hash, username, gender, birth_date, show_age, city, bio, hobbies, telegram, vk, avatar_url, role, is_banned, ban_reason, email_verified, created_at, updated_at, consent_at, consent_version, age_confirmed_at, ban_expires_at, username_changed_at FROM users WHERE email = $1
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -131,12 +211,17 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.EmailVerified,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ConsentAt,
+		&i.ConsentVersion,
+		&i.AgeConfirmedAt,
+		&i.BanExpiresAt,
+		&i.UsernameChangedAt,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, password_hash, username, gender, birth_date, show_age, city, bio, hobbies, telegram, vk, avatar_url, role, is_banned, ban_reason, email_verified, created_at, updated_at FROM users WHERE id = $1
+SELECT id, email, password_hash, username, gender, birth_date, show_age, city, bio, hobbies, telegram, vk, avatar_url, role, is_banned, ban_reason, email_verified, created_at, updated_at, consent_at, consent_version, age_confirmed_at, ban_expires_at, username_changed_at FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
@@ -162,8 +247,200 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.EmailVerified,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ConsentAt,
+		&i.ConsentVersion,
+		&i.AgeConfirmedAt,
+		&i.BanExpiresAt,
+		&i.UsernameChangedAt,
 	)
 	return i, err
+}
+
+const getUsernameHistory = `-- name: GetUsernameHistory :many
+SELECT id, old_username, changed_at
+FROM username_history
+WHERE user_id = $1
+ORDER BY changed_at DESC
+`
+
+type GetUsernameHistoryRow struct {
+	ID          uuid.UUID `json:"id"`
+	OldUsername string    `json:"old_username"`
+	ChangedAt   time.Time `json:"changed_at"`
+}
+
+func (q *Queries) GetUsernameHistory(ctx context.Context, userID uuid.UUID) ([]GetUsernameHistoryRow, error) {
+	rows, err := q.db.Query(ctx, getUsernameHistory, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetUsernameHistoryRow{}
+	for rows.Next() {
+		var i GetUsernameHistoryRow
+		if err := rows.Scan(&i.ID, &i.OldUsername, &i.ChangedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const insertUsernameHistory = `-- name: InsertUsernameHistory :exec
+INSERT INTO username_history (user_id, old_username)
+VALUES ($1, $2)
+`
+
+type InsertUsernameHistoryParams struct {
+	UserID      uuid.UUID `json:"user_id"`
+	OldUsername string    `json:"old_username"`
+}
+
+func (q *Queries) InsertUsernameHistory(ctx context.Context, arg InsertUsernameHistoryParams) error {
+	_, err := q.db.Exec(ctx, insertUsernameHistory, arg.UserID, arg.OldUsername)
+	return err
+}
+
+const listUserAttendedCompleted = `-- name: ListUserAttendedCompleted :many
+SELECT
+    e.id, e.title, e.category, e.starts_at, e.city,
+    u.username AS organizer_name, u.avatar_url AS organizer_avatar
+FROM applications a
+JOIN events e ON e.id = a.event_id
+JOIN users u ON u.id = e.organizer_id
+WHERE a.user_id = $1
+  AND a.status = 'approved'
+  AND e.status = 'completed'
+ORDER BY e.starts_at DESC
+LIMIT $2
+`
+
+type ListUserAttendedCompletedParams struct {
+	UserID uuid.UUID `json:"user_id"`
+	Limit  int32     `json:"limit"`
+}
+
+type ListUserAttendedCompletedRow struct {
+	ID              uuid.UUID `json:"id"`
+	Title           string    `json:"title"`
+	Category        string    `json:"category"`
+	StartsAt        time.Time `json:"starts_at"`
+	City            string    `json:"city"`
+	OrganizerName   string    `json:"organizer_name"`
+	OrganizerAvatar *string   `json:"organizer_avatar"`
+}
+
+// Завершённые события, куда юзер был approved. Пока без QR-чекина —
+// «посетил» = «был одобрен». После A3 (QR) заменим на attendance.
+func (q *Queries) ListUserAttendedCompleted(ctx context.Context, arg ListUserAttendedCompletedParams) ([]ListUserAttendedCompletedRow, error) {
+	rows, err := q.db.Query(ctx, listUserAttendedCompleted, arg.UserID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUserAttendedCompletedRow{}
+	for rows.Next() {
+		var i ListUserAttendedCompletedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Category,
+			&i.StartsAt,
+			&i.City,
+			&i.OrganizerName,
+			&i.OrganizerAvatar,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUserOrganizedCompleted = `-- name: ListUserOrganizedCompleted :many
+SELECT
+    e.id, e.title, e.category, e.starts_at, e.city,
+    (
+        SELECT COUNT(*) FROM applications a
+        WHERE a.event_id = e.id AND a.status = 'approved'
+    )::bigint AS participants_count
+FROM events e
+WHERE e.organizer_id = $1
+  AND e.status = 'completed'
+  AND EXISTS (
+      SELECT 1 FROM applications a
+      WHERE a.event_id = e.id AND a.status = 'approved'
+  )
+ORDER BY e.starts_at DESC
+LIMIT $2
+`
+
+type ListUserOrganizedCompletedParams struct {
+	OrganizerID uuid.UUID `json:"organizer_id"`
+	Limit       int32     `json:"limit"`
+}
+
+type ListUserOrganizedCompletedRow struct {
+	ID                uuid.UUID `json:"id"`
+	Title             string    `json:"title"`
+	Category          string    `json:"category"`
+	StartsAt          time.Time `json:"starts_at"`
+	City              string    `json:"city"`
+	ParticipantsCount int64     `json:"participants_count"`
+}
+
+// Завершённые события, которые юзер организовал и на которые были
+// одобренные участники. Отменённые — не включаем.
+func (q *Queries) ListUserOrganizedCompleted(ctx context.Context, arg ListUserOrganizedCompletedParams) ([]ListUserOrganizedCompletedRow, error) {
+	rows, err := q.db.Query(ctx, listUserOrganizedCompleted, arg.OrganizerID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUserOrganizedCompletedRow{}
+	for rows.Next() {
+		var i ListUserOrganizedCompletedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Category,
+			&i.StartsAt,
+			&i.City,
+			&i.ParticipantsCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const unbanExpiredUsers = `-- name: UnbanExpiredUsers :exec
+UPDATE users
+SET is_banned = false,
+    ban_reason = NULL,
+    ban_expires_at = NULL,
+    updated_at = now()
+WHERE is_banned = true
+  AND ban_expires_at IS NOT NULL
+  AND ban_expires_at < now()
+`
+
+// Снимает is_banned с пользователей, у которых истёк ban_expires_at.
+// Вызывается фоновым воркером раз в несколько минут, чтобы БД не копила
+// «зомби»-забаненных и Login/Refresh не путались.
+func (q *Queries) UnbanExpiredUsers(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, unbanExpiredUsers)
+	return err
 }
 
 const updateUser = `-- name: UpdateUser :one
@@ -173,7 +450,7 @@ SET
     hobbies = $7, telegram = $8, vk = $9, avatar_url = $10, show_age = $11,
     updated_at = now()
 WHERE id = $1
-RETURNING id, email, password_hash, username, gender, birth_date, show_age, city, bio, hobbies, telegram, vk, avatar_url, role, is_banned, ban_reason, email_verified, created_at, updated_at
+RETURNING id, email, password_hash, username, gender, birth_date, show_age, city, bio, hobbies, telegram, vk, avatar_url, role, is_banned, ban_reason, email_verified, created_at, updated_at, consent_at, consent_version, age_confirmed_at, ban_expires_at, username_changed_at
 `
 
 type UpdateUserParams struct {
@@ -225,6 +502,107 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		&i.EmailVerified,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ConsentAt,
+		&i.ConsentVersion,
+		&i.AgeConfirmedAt,
+		&i.BanExpiresAt,
+		&i.UsernameChangedAt,
 	)
 	return i, err
+}
+
+const updateUserFull = `-- name: UpdateUserFull :one
+UPDATE users
+SET
+    username = $2,
+    gender = $3,
+    birth_date = $4,
+    city = $5,
+    bio = $6,
+    hobbies = $7,
+    telegram = $8,
+    vk = $9,
+    avatar_url = $10,
+    show_age = $11,
+    username_changed_at = CASE 
+        WHEN $2 != username THEN now() 
+        ELSE username_changed_at 
+    END,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, email, password_hash, username, gender, birth_date, show_age, city, bio, hobbies, telegram, vk, avatar_url, role, is_banned, ban_reason, email_verified, created_at, updated_at, consent_at, consent_version, age_confirmed_at, ban_expires_at, username_changed_at
+`
+
+type UpdateUserFullParams struct {
+	ID        uuid.UUID   `json:"id"`
+	Username  string      `json:"username"`
+	Gender    *string     `json:"gender"`
+	BirthDate pgtype.Date `json:"birth_date"`
+	City      *string     `json:"city"`
+	Bio       *string     `json:"bio"`
+	Hobbies   []string    `json:"hobbies"`
+	Telegram  *string     `json:"telegram"`
+	Vk        *string     `json:"vk"`
+	AvatarUrl *string     `json:"avatar_url"`
+	ShowAge   bool        `json:"show_age"`
+}
+
+// Полное обновление профиля (включая username с проверкой «один раз»).
+// username передаётся уже валидированным в сервисе.
+func (q *Queries) UpdateUserFull(ctx context.Context, arg UpdateUserFullParams) (User, error) {
+	row := q.db.QueryRow(ctx, updateUserFull,
+		arg.ID,
+		arg.Username,
+		arg.Gender,
+		arg.BirthDate,
+		arg.City,
+		arg.Bio,
+		arg.Hobbies,
+		arg.Telegram,
+		arg.Vk,
+		arg.AvatarUrl,
+		arg.ShowAge,
+	)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.PasswordHash,
+		&i.Username,
+		&i.Gender,
+		&i.BirthDate,
+		&i.ShowAge,
+		&i.City,
+		&i.Bio,
+		&i.Hobbies,
+		&i.Telegram,
+		&i.Vk,
+		&i.AvatarUrl,
+		&i.Role,
+		&i.IsBanned,
+		&i.BanReason,
+		&i.EmailVerified,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ConsentAt,
+		&i.ConsentVersion,
+		&i.AgeConfirmedAt,
+		&i.BanExpiresAt,
+		&i.UsernameChangedAt,
+	)
+	return i, err
+}
+
+const updateUserPassword = `-- name: UpdateUserPassword :exec
+UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1
+`
+
+type UpdateUserPasswordParams struct {
+	ID           uuid.UUID `json:"id"`
+	PasswordHash string    `json:"password_hash"`
+}
+
+func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
+	_, err := q.db.Exec(ctx, updateUserPassword, arg.ID, arg.PasswordHash)
+	return err
 }

@@ -13,11 +13,221 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const adminCancelEvent = `-- name: AdminCancelEvent :one
+UPDATE events
+SET status = 'cancelled', cancel_reason = $2, updated_at = now()
+WHERE id = $1 AND status = 'active'
+RETURNING id, organizer_id, title, category, description, starts_at, city, address, lat, lng, location, hide_exact_location, participant_limit, status, cancel_reason, created_at, updated_at, hidden
+`
+
+type AdminCancelEventParams struct {
+	ID           uuid.UUID `json:"id"`
+	CancelReason *string   `json:"cancel_reason"`
+}
+
+func (q *Queries) AdminCancelEvent(ctx context.Context, arg AdminCancelEventParams) (Event, error) {
+	row := q.db.QueryRow(ctx, adminCancelEvent, arg.ID, arg.CancelReason)
+	var i Event
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizerID,
+		&i.Title,
+		&i.Category,
+		&i.Description,
+		&i.StartsAt,
+		&i.City,
+		&i.Address,
+		&i.Lat,
+		&i.Lng,
+		&i.Location,
+		&i.HideExactLocation,
+		&i.ParticipantLimit,
+		&i.Status,
+		&i.CancelReason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Hidden,
+	)
+	return i, err
+}
+
+const adminGetEventDetails = `-- name: AdminGetEventDetails :one
+SELECT 
+    e.id, e.organizer_id, e.title, e.category, e.description, e.starts_at, e.city, e.address, e.lat, e.lng, e.location, e.hide_exact_location, e.participant_limit, e.status, e.cancel_reason, e.created_at, e.updated_at, e.hidden,
+    u.username AS organizer_name,
+    u.email AS organizer_email,
+    u.avatar_url AS organizer_avatar,
+    (SELECT COUNT(*) FROM applications a WHERE a.event_id = e.id AND a.status = 'approved')::bigint AS participants_count,
+    (SELECT COUNT(*) FROM applications a WHERE a.event_id = e.id AND a.status = 'pending')::bigint  AS pending_count,
+    (SELECT COUNT(*) FROM applications a WHERE a.event_id = e.id AND a.status = 'rejected')::bigint AS rejected_count,
+    (SELECT COUNT(*) FROM chat_messages m WHERE m.event_id = e.id AND m.deleted_at IS NULL)::bigint AS messages_count
+FROM events e
+JOIN users u ON u.id = e.organizer_id
+WHERE e.id = $1
+`
+
+type AdminGetEventDetailsRow struct {
+	ID                uuid.UUID     `json:"id"`
+	OrganizerID       uuid.UUID     `json:"organizer_id"`
+	Title             string        `json:"title"`
+	Category          string        `json:"category"`
+	Description       *string       `json:"description"`
+	StartsAt          time.Time     `json:"starts_at"`
+	City              string        `json:"city"`
+	Address           *string       `json:"address"`
+	Lat               pgtype.Float8 `json:"lat"`
+	Lng               pgtype.Float8 `json:"lng"`
+	Location          interface{}   `json:"location"`
+	HideExactLocation bool          `json:"hide_exact_location"`
+	ParticipantLimit  pgtype.Int4   `json:"participant_limit"`
+	Status            string        `json:"status"`
+	CancelReason      *string       `json:"cancel_reason"`
+	CreatedAt         time.Time     `json:"created_at"`
+	UpdatedAt         time.Time     `json:"updated_at"`
+	Hidden            bool          `json:"hidden"`
+	OrganizerName     string        `json:"organizer_name"`
+	OrganizerEmail    string        `json:"organizer_email"`
+	OrganizerAvatar   *string       `json:"organizer_avatar"`
+	ParticipantsCount int64         `json:"participants_count"`
+	PendingCount      int64         `json:"pending_count"`
+	RejectedCount     int64         `json:"rejected_count"`
+	MessagesCount     int64         `json:"messages_count"`
+}
+
+func (q *Queries) AdminGetEventDetails(ctx context.Context, id uuid.UUID) (AdminGetEventDetailsRow, error) {
+	row := q.db.QueryRow(ctx, adminGetEventDetails, id)
+	var i AdminGetEventDetailsRow
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizerID,
+		&i.Title,
+		&i.Category,
+		&i.Description,
+		&i.StartsAt,
+		&i.City,
+		&i.Address,
+		&i.Lat,
+		&i.Lng,
+		&i.Location,
+		&i.HideExactLocation,
+		&i.ParticipantLimit,
+		&i.Status,
+		&i.CancelReason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Hidden,
+		&i.OrganizerName,
+		&i.OrganizerEmail,
+		&i.OrganizerAvatar,
+		&i.ParticipantsCount,
+		&i.PendingCount,
+		&i.RejectedCount,
+		&i.MessagesCount,
+	)
+	return i, err
+}
+
+const adminGetRecentMessages = `-- name: AdminGetRecentMessages :many
+SELECT 
+    m.id, m.event_id, m.user_id, m.text, m.reply_to_id, m.created_at, m.deleted_at,
+    u.username AS user_name, u.avatar_url AS user_avatar
+FROM chat_messages m
+JOIN users u ON u.id = m.user_id
+WHERE m.event_id = $1
+ORDER BY m.created_at DESC
+LIMIT $2
+`
+
+type AdminGetRecentMessagesParams struct {
+	EventID uuid.UUID `json:"event_id"`
+	Limit   int32     `json:"limit"`
+}
+
+type AdminGetRecentMessagesRow struct {
+	ID         uuid.UUID  `json:"id"`
+	EventID    uuid.UUID  `json:"event_id"`
+	UserID     uuid.UUID  `json:"user_id"`
+	Text       string     `json:"text"`
+	ReplyToID  *uuid.UUID `json:"reply_to_id"`
+	CreatedAt  time.Time  `json:"created_at"`
+	DeletedAt  *time.Time `json:"deleted_at"`
+	UserName   string     `json:"user_name"`
+	UserAvatar *string    `json:"user_avatar"`
+}
+
+func (q *Queries) AdminGetRecentMessages(ctx context.Context, arg AdminGetRecentMessagesParams) ([]AdminGetRecentMessagesRow, error) {
+	rows, err := q.db.Query(ctx, adminGetRecentMessages, arg.EventID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AdminGetRecentMessagesRow{}
+	for rows.Next() {
+		var i AdminGetRecentMessagesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.EventID,
+			&i.UserID,
+			&i.Text,
+			&i.ReplyToID,
+			&i.CreatedAt,
+			&i.DeletedAt,
+			&i.UserName,
+			&i.UserAvatar,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const adminHideEvent = `-- name: AdminHideEvent :one
+UPDATE events
+SET hidden = true, updated_at = now()
+WHERE id = $1
+RETURNING id, hidden
+`
+
+type AdminHideEventRow struct {
+	ID     uuid.UUID `json:"id"`
+	Hidden bool      `json:"hidden"`
+}
+
+func (q *Queries) AdminHideEvent(ctx context.Context, id uuid.UUID) (AdminHideEventRow, error) {
+	row := q.db.QueryRow(ctx, adminHideEvent, id)
+	var i AdminHideEventRow
+	err := row.Scan(&i.ID, &i.Hidden)
+	return i, err
+}
+
+const adminUnhideEvent = `-- name: AdminUnhideEvent :one
+UPDATE events
+SET hidden = false, updated_at = now()
+WHERE id = $1
+RETURNING id, hidden
+`
+
+type AdminUnhideEventRow struct {
+	ID     uuid.UUID `json:"id"`
+	Hidden bool      `json:"hidden"`
+}
+
+func (q *Queries) AdminUnhideEvent(ctx context.Context, id uuid.UUID) (AdminUnhideEventRow, error) {
+	row := q.db.QueryRow(ctx, adminUnhideEvent, id)
+	var i AdminUnhideEventRow
+	err := row.Scan(&i.ID, &i.Hidden)
+	return i, err
+}
+
 const cancelEvent = `-- name: CancelEvent :one
 UPDATE events
 SET status = 'cancelled', cancel_reason = $2, updated_at = now()
 WHERE id = $1 AND organizer_id = $3 AND status = 'active'
-RETURNING id, organizer_id, title, category, description, starts_at, city, address, lat, lng, location, hide_exact_location, participant_limit, status, cancel_reason, created_at, updated_at
+RETURNING id, organizer_id, title, category, description, starts_at, city, address, lat, lng, location, hide_exact_location, participant_limit, status, cancel_reason, created_at, updated_at, hidden
 `
 
 type CancelEventParams struct {
@@ -47,13 +257,14 @@ func (q *Queries) CancelEvent(ctx context.Context, arg CancelEventParams) (Event
 		&i.CancelReason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Hidden,
 	)
 	return i, err
 }
 
 const countActiveEventsByOrganizer = `-- name: CountActiveEventsByOrganizer :one
 SELECT COUNT(*) FROM events 
-WHERE organizer_id = $1 AND status = 'active'
+WHERE organizer_id = $1 AND status = 'active' AND starts_at > now()
 `
 
 func (q *Queries) CountActiveEventsByOrganizer(ctx context.Context, organizerID uuid.UUID) (int64, error) {
@@ -71,7 +282,7 @@ INSERT INTO events (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, 
     ST_SetSRID(ST_MakePoint($9, $8), 4326)::geography, -- $8=lat, $9=lng
     $10, $11
-) RETURNING id, organizer_id, title, category, description, starts_at, city, address, lat, lng, location, hide_exact_location, participant_limit, status, cancel_reason, created_at, updated_at
+) RETURNING id, organizer_id, title, category, description, starts_at, city, address, lat, lng, location, hide_exact_location, participant_limit, status, cancel_reason, created_at, updated_at, hidden
 `
 
 type CreateEventParams struct {
@@ -121,17 +332,81 @@ func (q *Queries) CreateEvent(ctx context.Context, arg CreateEventParams) (Event
 		&i.CancelReason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Hidden,
 	)
 	return i, err
 }
 
 const getEventByID = `-- name: GetEventByID :one
-SELECT id, organizer_id, title, category, description, starts_at, city, address, lat, lng, location, hide_exact_location, participant_limit, status, cancel_reason, created_at, updated_at FROM events WHERE id = $1
+SELECT 
+    e.id, e.organizer_id, e.title, e.category, e.description, e.starts_at, e.city, e.address, e.lat, e.lng, e.location, e.hide_exact_location, e.participant_limit, e.status, e.cancel_reason, e.created_at, e.updated_at, e.hidden,
+    u.username AS organizer_name,
+    u.avatar_url AS organizer_avatar,
+    (
+        SELECT COUNT(*) FROM applications a 
+        WHERE a.event_id = e.id AND a.status = 'approved'
+    )::bigint AS participants_count,
+    COALESCE(
+        (
+            SELECT a.status::text FROM applications a
+            WHERE a.event_id = e.id AND a.user_id = $2
+            LIMIT 1
+        ),
+        ''
+    ) AS user_application_status,
+    a_viewer.id AS user_application_id,
+    CASE
+        WHEN e.hide_exact_location = false THEN true
+        WHEN e.organizer_id = $2 THEN true
+        WHEN EXISTS (
+            SELECT 1 FROM applications a
+            WHERE a.event_id = e.id
+              AND a.user_id = $2
+              AND a.status = 'approved'
+        ) THEN true
+        ELSE false
+    END AS can_see_exact_location
+FROM events e
+JOIN users u ON u.id = e.organizer_id
+LEFT JOIN applications a_viewer ON a_viewer.event_id = e.id AND a_viewer.user_id = $2
+WHERE e.id = $1
 `
 
-func (q *Queries) GetEventByID(ctx context.Context, id uuid.UUID) (Event, error) {
-	row := q.db.QueryRow(ctx, getEventByID, id)
-	var i Event
+type GetEventByIDParams struct {
+	ID       uuid.UUID  `json:"id"`
+	ViewerID *uuid.UUID `json:"viewer_id"`
+}
+
+type GetEventByIDRow struct {
+	ID                    uuid.UUID     `json:"id"`
+	OrganizerID           uuid.UUID     `json:"organizer_id"`
+	Title                 string        `json:"title"`
+	Category              string        `json:"category"`
+	Description           *string       `json:"description"`
+	StartsAt              time.Time     `json:"starts_at"`
+	City                  string        `json:"city"`
+	Address               *string       `json:"address"`
+	Lat                   pgtype.Float8 `json:"lat"`
+	Lng                   pgtype.Float8 `json:"lng"`
+	Location              interface{}   `json:"location"`
+	HideExactLocation     bool          `json:"hide_exact_location"`
+	ParticipantLimit      pgtype.Int4   `json:"participant_limit"`
+	Status                string        `json:"status"`
+	CancelReason          *string       `json:"cancel_reason"`
+	CreatedAt             time.Time     `json:"created_at"`
+	UpdatedAt             time.Time     `json:"updated_at"`
+	Hidden                bool          `json:"hidden"`
+	OrganizerName         string        `json:"organizer_name"`
+	OrganizerAvatar       *string       `json:"organizer_avatar"`
+	ParticipantsCount     int64         `json:"participants_count"`
+	UserApplicationStatus interface{}   `json:"user_application_status"`
+	UserApplicationID     *uuid.UUID    `json:"user_application_id"`
+	CanSeeExactLocation   bool          `json:"can_see_exact_location"`
+}
+
+func (q *Queries) GetEventByID(ctx context.Context, arg GetEventByIDParams) (GetEventByIDRow, error) {
+	row := q.db.QueryRow(ctx, getEventByID, arg.ID, arg.ViewerID)
+	var i GetEventByIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.OrganizerID,
@@ -150,49 +425,113 @@ func (q *Queries) GetEventByID(ctx context.Context, id uuid.UUID) (Event, error)
 		&i.CancelReason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Hidden,
+		&i.OrganizerName,
+		&i.OrganizerAvatar,
+		&i.ParticipantsCount,
+		&i.UserApplicationStatus,
+		&i.UserApplicationID,
+		&i.CanSeeExactLocation,
 	)
 	return i, err
 }
 
 const getEventsArchive = `-- name: GetEventsArchive :many
-SELECT e.id, e.organizer_id, e.title, e.category, e.description, e.starts_at, e.city, e.address, e.lat, e.lng, e.location, e.hide_exact_location, e.participant_limit, e.status, e.cancel_reason, e.created_at, e.updated_at, u.username AS organizer_name, u.avatar_url AS organizer_avatar
+SELECT 
+    e.id, e.organizer_id, e.title, e.category, e.description, e.starts_at, e.city, e.address, e.lat, e.lng, e.location, e.hide_exact_location, e.participant_limit, e.status, e.cancel_reason, e.created_at, e.updated_at, e.hidden, 
+    u.username AS organizer_name, 
+    u.avatar_url AS organizer_avatar,
+    COALESCE(a_viewer.status::text, '') AS user_application_status,
+    CASE
+        WHEN e.hide_exact_location = false THEN true
+        WHEN e.organizer_id = $2 THEN true
+        WHEN a_viewer.status = 'approved' THEN true
+        ELSE false
+    END AS can_see_exact_location
 FROM events e
 JOIN users u ON u.id = e.organizer_id
-WHERE (e.status = 'completed' OR e.status = 'cancelled' OR e.starts_at < now())
-  AND ($2::timestamptz IS NULL OR e.starts_at < $2)
-ORDER BY e.starts_at DESC
+LEFT JOIN applications a_viewer ON a_viewer.event_id = e.id AND a_viewer.user_id = $2
+WHERE (
+    -- Завершённые — все.
+    e.status = 'completed'
+    -- «Идёт сейчас»: активное, началось не позже now, кончится не раньше now.
+    -- Дефолтная длительность 2 часа (ends_at пока нет). После 2 часов
+    -- EventWorker переведёт в completed — в архив попадёт уже как завершённое.
+    OR (e.status = 'active' AND e.starts_at <= now() AND e.starts_at + interval '2 hours' > now())
+    
+    -- Отменённые — только тем, кто был причастен (орг или подавал любую заявку).
+    -- ВАЖНО: при отмене события Cancel каскадно переводит pending/approved
+    -- в cancelled — поэтому проверять ` + "`" + `status IN ('approved','pending')` + "`" + ` бессмысленно
+    -- (все заявки уже cancelled). Ищем ЛЮБУЮ заявку: если юзер интересовался
+    -- событием (подавал заявку) — он должен видеть, что оно отменилось.
+    OR (e.status = 'cancelled' AND (
+        e.organizer_id = $2
+        OR EXISTS (
+            SELECT 1 FROM applications a
+            WHERE a.event_id = e.id AND a.user_id = $2
+        )
+    ))
+)
+  -- Те же фильтры, что в ленте.
+  AND ($3::text IS NULL OR e.category = ANY(string_to_array($3::text, ',')))
+  AND ($4::text IS NULL OR e.city = $4)
+  AND ($5::timestamptz IS NULL OR e.starts_at >= $5)
+  AND ($6::timestamptz IS NULL OR e.starts_at <= $6)
+  AND (
+    $7::timestamptz IS NULL
+    OR (e.starts_at, e.id) < ($7::timestamptz, $8::uuid)
+  )
+ORDER BY e.starts_at DESC, e.id DESC
 LIMIT $1
 `
 
 type GetEventsArchiveParams struct {
 	Limit      int32      `json:"limit"`
+	ViewerID   *uuid.UUID `json:"viewer_id"`
+	Category   *string    `json:"category"`
+	City       *string    `json:"city"`
+	DateFrom   *time.Time `json:"date_from"`
+	DateTo     *time.Time `json:"date_to"`
 	CursorTime *time.Time `json:"cursor_time"`
+	CursorID   *uuid.UUID `json:"cursor_id"`
 }
 
 type GetEventsArchiveRow struct {
-	ID                uuid.UUID     `json:"id"`
-	OrganizerID       uuid.UUID     `json:"organizer_id"`
-	Title             string        `json:"title"`
-	Category          string        `json:"category"`
-	Description       *string       `json:"description"`
-	StartsAt          time.Time     `json:"starts_at"`
-	City              string        `json:"city"`
-	Address           *string       `json:"address"`
-	Lat               pgtype.Float8 `json:"lat"`
-	Lng               pgtype.Float8 `json:"lng"`
-	Location          interface{}   `json:"location"`
-	HideExactLocation bool          `json:"hide_exact_location"`
-	ParticipantLimit  pgtype.Int4   `json:"participant_limit"`
-	Status            string        `json:"status"`
-	CancelReason      *string       `json:"cancel_reason"`
-	CreatedAt         time.Time     `json:"created_at"`
-	UpdatedAt         time.Time     `json:"updated_at"`
-	OrganizerName     string        `json:"organizer_name"`
-	OrganizerAvatar   *string       `json:"organizer_avatar"`
+	ID                    uuid.UUID     `json:"id"`
+	OrganizerID           uuid.UUID     `json:"organizer_id"`
+	Title                 string        `json:"title"`
+	Category              string        `json:"category"`
+	Description           *string       `json:"description"`
+	StartsAt              time.Time     `json:"starts_at"`
+	City                  string        `json:"city"`
+	Address               *string       `json:"address"`
+	Lat                   pgtype.Float8 `json:"lat"`
+	Lng                   pgtype.Float8 `json:"lng"`
+	Location              interface{}   `json:"location"`
+	HideExactLocation     bool          `json:"hide_exact_location"`
+	ParticipantLimit      pgtype.Int4   `json:"participant_limit"`
+	Status                string        `json:"status"`
+	CancelReason          *string       `json:"cancel_reason"`
+	CreatedAt             time.Time     `json:"created_at"`
+	UpdatedAt             time.Time     `json:"updated_at"`
+	Hidden                bool          `json:"hidden"`
+	OrganizerName         string        `json:"organizer_name"`
+	OrganizerAvatar       *string       `json:"organizer_avatar"`
+	UserApplicationStatus interface{}   `json:"user_application_status"`
+	CanSeeExactLocation   bool          `json:"can_see_exact_location"`
 }
 
 func (q *Queries) GetEventsArchive(ctx context.Context, arg GetEventsArchiveParams) ([]GetEventsArchiveRow, error) {
-	rows, err := q.db.Query(ctx, getEventsArchive, arg.Limit, arg.CursorTime)
+	rows, err := q.db.Query(ctx, getEventsArchive,
+		arg.Limit,
+		arg.ViewerID,
+		arg.Category,
+		arg.City,
+		arg.DateFrom,
+		arg.DateTo,
+		arg.CursorTime,
+		arg.CursorID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -218,8 +557,11 @@ func (q *Queries) GetEventsArchive(ctx context.Context, arg GetEventsArchivePara
 			&i.CancelReason,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Hidden,
 			&i.OrganizerName,
 			&i.OrganizerAvatar,
+			&i.UserApplicationStatus,
+			&i.CanSeeExactLocation,
 		); err != nil {
 			return nil, err
 		}
@@ -232,59 +574,101 @@ func (q *Queries) GetEventsArchive(ctx context.Context, arg GetEventsArchivePara
 }
 
 const getEventsFeed = `-- name: GetEventsFeed :many
-SELECT e.id, e.organizer_id, e.title, e.category, e.description, e.starts_at, e.city, e.address, e.lat, e.lng, e.location, e.hide_exact_location, e.participant_limit, e.status, e.cancel_reason, e.created_at, e.updated_at, u.username AS organizer_name, u.avatar_url AS organizer_avatar
+SELECT 
+    e.id, e.organizer_id, e.title, e.category, e.description, e.starts_at, e.city, e.address, e.lat, e.lng, e.location, e.hide_exact_location, e.participant_limit, e.status, e.cancel_reason, e.created_at, e.updated_at, e.hidden, 
+    u.username AS organizer_name, 
+    u.avatar_url AS organizer_avatar,
+    COALESCE(COUNT(DISTINCT a_approved.id), 0)::bigint AS participants_count,
+    COALESCE(a_viewer.status::text, '') AS user_application_status,
+    a_viewer.id AS user_application_id,
+    CASE
+        WHEN e.organizer_id = $2 THEN (
+            SELECT COUNT(*) FROM applications a 
+            WHERE a.event_id = e.id AND a.status = 'pending'
+        )::bigint
+        ELSE 0::bigint
+    END AS pending_applications_count,
+    CASE
+        WHEN e.hide_exact_location = false THEN true
+        WHEN e.organizer_id = $2 THEN true
+        WHEN a_viewer.status = 'approved' THEN true
+        ELSE false
+    END AS can_see_exact_location
 FROM events e
 JOIN users u ON u.id = e.organizer_id
+LEFT JOIN applications a_approved ON a_approved.event_id = e.id AND a_approved.status = 'approved'
+LEFT JOIN applications a_viewer ON a_viewer.event_id = e.id AND a_viewer.user_id = $2
 WHERE e.status = 'active' 
+  AND e.hidden = false
   AND e.starts_at >= now()
-  AND ($2::text IS NULL OR e.category = $2)
-  AND ($3::text IS NULL OR e.city = $3)
-  AND ($4::timestamptz IS NULL OR e.starts_at >= $4)
-  AND ($5::timestamptz IS NULL OR e.starts_at <= $5)
-  AND ($6::timestamptz IS NULL OR e.starts_at > $6)
-ORDER BY e.starts_at ASC
+  AND (
+    $3::text IS NULL 
+    OR e.category = ANY(string_to_array($3::text, ','))
+)
+  AND ($4::text IS NULL OR e.city = $4)
+  AND ($5::timestamptz IS NULL OR e.starts_at >= $5)
+  AND ($6::timestamptz IS NULL OR e.starts_at <= $6)
+  -- Композитный курсор: (starts_at, id) строго больше последней позиции.
+  -- Без id два события в одну секунду на границе страницы пропадали
+  -- или дублировались (starts_at > cursor — строгое неравенство).
+  AND (
+    $7::timestamptz IS NULL
+    OR (e.starts_at, e.id) > ($7::timestamptz, $8::uuid)
+  )
+GROUP BY e.id, u.username, u.avatar_url, a_viewer.id, a_viewer.status
+ORDER BY e.starts_at ASC, e.id ASC
 LIMIT $1
 `
 
 type GetEventsFeedParams struct {
 	Limit      int32      `json:"limit"`
+	ViewerID   *uuid.UUID `json:"viewer_id"`
 	Category   *string    `json:"category"`
 	City       *string    `json:"city"`
 	DateFrom   *time.Time `json:"date_from"`
 	DateTo     *time.Time `json:"date_to"`
 	CursorTime *time.Time `json:"cursor_time"`
+	CursorID   *uuid.UUID `json:"cursor_id"`
 }
 
 type GetEventsFeedRow struct {
-	ID                uuid.UUID     `json:"id"`
-	OrganizerID       uuid.UUID     `json:"organizer_id"`
-	Title             string        `json:"title"`
-	Category          string        `json:"category"`
-	Description       *string       `json:"description"`
-	StartsAt          time.Time     `json:"starts_at"`
-	City              string        `json:"city"`
-	Address           *string       `json:"address"`
-	Lat               pgtype.Float8 `json:"lat"`
-	Lng               pgtype.Float8 `json:"lng"`
-	Location          interface{}   `json:"location"`
-	HideExactLocation bool          `json:"hide_exact_location"`
-	ParticipantLimit  pgtype.Int4   `json:"participant_limit"`
-	Status            string        `json:"status"`
-	CancelReason      *string       `json:"cancel_reason"`
-	CreatedAt         time.Time     `json:"created_at"`
-	UpdatedAt         time.Time     `json:"updated_at"`
-	OrganizerName     string        `json:"organizer_name"`
-	OrganizerAvatar   *string       `json:"organizer_avatar"`
+	ID                       uuid.UUID     `json:"id"`
+	OrganizerID              uuid.UUID     `json:"organizer_id"`
+	Title                    string        `json:"title"`
+	Category                 string        `json:"category"`
+	Description              *string       `json:"description"`
+	StartsAt                 time.Time     `json:"starts_at"`
+	City                     string        `json:"city"`
+	Address                  *string       `json:"address"`
+	Lat                      pgtype.Float8 `json:"lat"`
+	Lng                      pgtype.Float8 `json:"lng"`
+	Location                 interface{}   `json:"location"`
+	HideExactLocation        bool          `json:"hide_exact_location"`
+	ParticipantLimit         pgtype.Int4   `json:"participant_limit"`
+	Status                   string        `json:"status"`
+	CancelReason             *string       `json:"cancel_reason"`
+	CreatedAt                time.Time     `json:"created_at"`
+	UpdatedAt                time.Time     `json:"updated_at"`
+	Hidden                   bool          `json:"hidden"`
+	OrganizerName            string        `json:"organizer_name"`
+	OrganizerAvatar          *string       `json:"organizer_avatar"`
+	ParticipantsCount        int64         `json:"participants_count"`
+	UserApplicationStatus    interface{}   `json:"user_application_status"`
+	UserApplicationID        *uuid.UUID    `json:"user_application_id"`
+	PendingApplicationsCount int64         `json:"pending_applications_count"`
+	CanSeeExactLocation      bool          `json:"can_see_exact_location"`
 }
 
 func (q *Queries) GetEventsFeed(ctx context.Context, arg GetEventsFeedParams) ([]GetEventsFeedRow, error) {
 	rows, err := q.db.Query(ctx, getEventsFeed,
 		arg.Limit,
+		arg.ViewerID,
 		arg.Category,
 		arg.City,
 		arg.DateFrom,
 		arg.DateTo,
 		arg.CursorTime,
+		arg.CursorID,
 	)
 	if err != nil {
 		return nil, err
@@ -311,8 +695,14 @@ func (q *Queries) GetEventsFeed(ctx context.Context, arg GetEventsFeedParams) ([
 			&i.CancelReason,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Hidden,
 			&i.OrganizerName,
 			&i.OrganizerAvatar,
+			&i.ParticipantsCount,
+			&i.UserApplicationStatus,
+			&i.UserApplicationID,
+			&i.PendingApplicationsCount,
+			&i.CanSeeExactLocation,
 		); err != nil {
 			return nil, err
 		}
@@ -322,4 +712,232 @@ func (q *Queries) GetEventsFeed(ctx context.Context, arg GetEventsFeedParams) ([
 		return nil, err
 	}
 	return items, nil
+}
+
+const getMyOrganizedEvents = `-- name: GetMyOrganizedEvents :many
+SELECT 
+    e.id, e.organizer_id, e.title, e.category, e.description, e.starts_at, e.city, e.address, e.lat, e.lng, e.location, e.hide_exact_location, e.participant_limit, e.status, e.cancel_reason, e.created_at, e.updated_at, e.hidden, 
+    u.username AS organizer_name, 
+    u.avatar_url AS organizer_avatar,
+    (SELECT COUNT(*) FROM applications a WHERE a.event_id = e.id AND a.status = 'approved')::bigint AS participants_count,
+    ''::text AS user_application_status,
+    NULL::uuid AS user_application_id,
+    (SELECT COUNT(*) FROM applications a WHERE a.event_id = e.id AND a.status = 'pending')::bigint AS pending_applications_count,
+    true AS can_see_exact_location
+FROM events e
+JOIN users u ON u.id = e.organizer_id
+WHERE e.organizer_id = $1
+ORDER BY e.starts_at DESC
+`
+
+type GetMyOrganizedEventsRow struct {
+	ID                       uuid.UUID     `json:"id"`
+	OrganizerID              uuid.UUID     `json:"organizer_id"`
+	Title                    string        `json:"title"`
+	Category                 string        `json:"category"`
+	Description              *string       `json:"description"`
+	StartsAt                 time.Time     `json:"starts_at"`
+	City                     string        `json:"city"`
+	Address                  *string       `json:"address"`
+	Lat                      pgtype.Float8 `json:"lat"`
+	Lng                      pgtype.Float8 `json:"lng"`
+	Location                 interface{}   `json:"location"`
+	HideExactLocation        bool          `json:"hide_exact_location"`
+	ParticipantLimit         pgtype.Int4   `json:"participant_limit"`
+	Status                   string        `json:"status"`
+	CancelReason             *string       `json:"cancel_reason"`
+	CreatedAt                time.Time     `json:"created_at"`
+	UpdatedAt                time.Time     `json:"updated_at"`
+	Hidden                   bool          `json:"hidden"`
+	OrganizerName            string        `json:"organizer_name"`
+	OrganizerAvatar          *string       `json:"organizer_avatar"`
+	ParticipantsCount        int64         `json:"participants_count"`
+	UserApplicationStatus    string        `json:"user_application_status"`
+	UserApplicationID        *uuid.UUID    `json:"user_application_id"`
+	PendingApplicationsCount int64         `json:"pending_applications_count"`
+	CanSeeExactLocation      bool          `json:"can_see_exact_location"`
+}
+
+func (q *Queries) GetMyOrganizedEvents(ctx context.Context, organizerID uuid.UUID) ([]GetMyOrganizedEventsRow, error) {
+	rows, err := q.db.Query(ctx, getMyOrganizedEvents, organizerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetMyOrganizedEventsRow{}
+	for rows.Next() {
+		var i GetMyOrganizedEventsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrganizerID,
+			&i.Title,
+			&i.Category,
+			&i.Description,
+			&i.StartsAt,
+			&i.City,
+			&i.Address,
+			&i.Lat,
+			&i.Lng,
+			&i.Location,
+			&i.HideExactLocation,
+			&i.ParticipantLimit,
+			&i.Status,
+			&i.CancelReason,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Hidden,
+			&i.OrganizerName,
+			&i.OrganizerAvatar,
+			&i.ParticipantsCount,
+			&i.UserApplicationStatus,
+			&i.UserApplicationID,
+			&i.PendingApplicationsCount,
+			&i.CanSeeExactLocation,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listApprovedParticipants = `-- name: ListApprovedParticipants :many
+SELECT 
+    u.id, u.username, u.avatar_url, u.city, u.birth_date, u.show_age,
+    (u.id = e.organizer_id) AS is_organizer
+FROM applications a
+JOIN users u ON u.id = a.user_id
+JOIN events e ON e.id = a.event_id
+WHERE a.event_id = $1 AND a.status = 'approved'
+ORDER BY (u.id = e.organizer_id) DESC, a.created_at ASC
+`
+
+type ListApprovedParticipantsRow struct {
+	ID          uuid.UUID   `json:"id"`
+	Username    string      `json:"username"`
+	AvatarUrl   *string     `json:"avatar_url"`
+	City        *string     `json:"city"`
+	BirthDate   pgtype.Date `json:"birth_date"`
+	ShowAge     bool        `json:"show_age"`
+	IsOrganizer bool        `json:"is_organizer"`
+}
+
+// Участники события со статусом approved. Организатор — всегда первый.
+// Pending/rejected/cancelled НЕ возвращаются (pending виден только орг
+// через /events/{id}/applications).
+func (q *Queries) ListApprovedParticipants(ctx context.Context, eventID uuid.UUID) ([]ListApprovedParticipantsRow, error) {
+	rows, err := q.db.Query(ctx, listApprovedParticipants, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListApprovedParticipantsRow{}
+	for rows.Next() {
+		var i ListApprovedParticipantsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Username,
+			&i.AvatarUrl,
+			&i.City,
+			&i.BirthDate,
+			&i.ShowAge,
+			&i.IsOrganizer,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markPastEventsCompleted = `-- name: MarkPastEventsCompleted :exec
+UPDATE events SET status = 'completed', updated_at = now()
+WHERE status = 'active' AND starts_at + interval '2 hours' < now()
+`
+
+// Событие считается завершённым через 2 часа после старта (дефолтная
+// длительность). Пока этот интервал не истёк, событие видно в архиве
+// с плашкой «идёт сейчас». Если появится ends_at — заменить на него.
+func (q *Queries) MarkPastEventsCompleted(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, markPastEventsCompleted)
+	return err
+}
+
+const updateEvent = `-- name: UpdateEvent :one
+UPDATE events
+SET 
+    title = $2,
+    category = $3,
+    description = $4,
+    starts_at = $5,
+    city = $6,
+    address = $7,
+    lat = $8,
+    lng = $9,
+    location = ST_SetSRID(ST_MakePoint($9, $8), 4326)::geography,
+    hide_exact_location = $10,
+    participant_limit = $11,
+    updated_at = now()
+WHERE id = $1 AND organizer_id = $12
+RETURNING id, organizer_id, title, category, description, starts_at, city, address, lat, lng, location, hide_exact_location, participant_limit, status, cancel_reason, created_at, updated_at, hidden
+`
+
+type UpdateEventParams struct {
+	ID                uuid.UUID     `json:"id"`
+	Title             string        `json:"title"`
+	Category          string        `json:"category"`
+	Description       *string       `json:"description"`
+	StartsAt          time.Time     `json:"starts_at"`
+	City              string        `json:"city"`
+	Address           *string       `json:"address"`
+	Lat               pgtype.Float8 `json:"lat"`
+	Lng               pgtype.Float8 `json:"lng"`
+	HideExactLocation bool          `json:"hide_exact_location"`
+	ParticipantLimit  pgtype.Int4   `json:"participant_limit"`
+	OrganizerID       uuid.UUID     `json:"organizer_id"`
+}
+
+func (q *Queries) UpdateEvent(ctx context.Context, arg UpdateEventParams) (Event, error) {
+	row := q.db.QueryRow(ctx, updateEvent,
+		arg.ID,
+		arg.Title,
+		arg.Category,
+		arg.Description,
+		arg.StartsAt,
+		arg.City,
+		arg.Address,
+		arg.Lat,
+		arg.Lng,
+		arg.HideExactLocation,
+		arg.ParticipantLimit,
+		arg.OrganizerID,
+	)
+	var i Event
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizerID,
+		&i.Title,
+		&i.Category,
+		&i.Description,
+		&i.StartsAt,
+		&i.City,
+		&i.Address,
+		&i.Lat,
+		&i.Lng,
+		&i.Location,
+		&i.HideExactLocation,
+		&i.ParticipantLimit,
+		&i.Status,
+		&i.CancelReason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Hidden,
+	)
+	return i, err
 }

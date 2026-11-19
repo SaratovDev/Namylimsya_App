@@ -7,9 +7,11 @@ package dbgen
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const adminActivityChart = `-- name: AdminActivityChart :many
@@ -48,28 +50,39 @@ func (q *Queries) AdminActivityChart(ctx context.Context) ([]AdminActivityChartR
 }
 
 const adminBanUser = `-- name: AdminBanUser :one
-UPDATE users SET is_banned = $2, ban_reason = $3, updated_at = now()
+UPDATE users SET 
+    is_banned = $2, 
+    ban_reason = $3, 
+    ban_expires_at = $4,
+    updated_at = now()
 WHERE id = $1
-RETURNING id, email, username, role, is_banned, ban_reason
+RETURNING id, email, username, role, is_banned, ban_reason, ban_expires_at
 `
 
 type AdminBanUserParams struct {
-	ID        uuid.UUID `json:"id"`
-	IsBanned  bool      `json:"is_banned"`
-	BanReason *string   `json:"ban_reason"`
+	ID           uuid.UUID  `json:"id"`
+	IsBanned     bool       `json:"is_banned"`
+	BanReason    *string    `json:"ban_reason"`
+	BanExpiresAt *time.Time `json:"ban_expires_at"`
 }
 
 type AdminBanUserRow struct {
-	ID        uuid.UUID `json:"id"`
-	Email     string    `json:"email"`
-	Username  string    `json:"username"`
-	Role      string    `json:"role"`
-	IsBanned  bool      `json:"is_banned"`
-	BanReason *string   `json:"ban_reason"`
+	ID           uuid.UUID  `json:"id"`
+	Email        string     `json:"email"`
+	Username     string     `json:"username"`
+	Role         string     `json:"role"`
+	IsBanned     bool       `json:"is_banned"`
+	BanReason    *string    `json:"ban_reason"`
+	BanExpiresAt *time.Time `json:"ban_expires_at"`
 }
 
 func (q *Queries) AdminBanUser(ctx context.Context, arg AdminBanUserParams) (AdminBanUserRow, error) {
-	row := q.db.QueryRow(ctx, adminBanUser, arg.ID, arg.IsBanned, arg.BanReason)
+	row := q.db.QueryRow(ctx, adminBanUser,
+		arg.ID,
+		arg.IsBanned,
+		arg.BanReason,
+		arg.BanExpiresAt,
+	)
 	var i AdminBanUserRow
 	err := row.Scan(
 		&i.ID,
@@ -78,6 +91,7 @@ func (q *Queries) AdminBanUser(ctx context.Context, arg AdminBanUserParams) (Adm
 		&i.Role,
 		&i.IsBanned,
 		&i.BanReason,
+		&i.BanExpiresAt,
 	)
 	return i, err
 }
@@ -171,35 +185,247 @@ func (q *Queries) AdminDeleteEvent(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const adminGetUserDetails = `-- name: AdminGetUserDetails :one
+SELECT 
+    u.id, u.email, u.username, u.gender, u.birth_date, u.show_age,
+    u.city, u.bio, u.hobbies, u.telegram, u.vk, u.avatar_url,
+    u.role, u.is_banned, u.ban_reason, u.ban_expires_at,
+    u.email_verified, u.consent_at, u.consent_version, u.age_confirmed_at,
+    u.created_at, u.updated_at,
+    (SELECT COUNT(*) FROM events e WHERE e.organizer_id = u.id)::bigint          AS organized_events_count,
+    (SELECT COUNT(*) FROM applications a WHERE a.user_id = u.id)::bigint         AS applications_total,
+    (SELECT COUNT(*) FROM applications a WHERE a.user_id = u.id AND a.status = 'approved')::bigint AS applications_approved,
+    (SELECT COUNT(*) FROM applications a WHERE a.user_id = u.id AND a.status = 'pending')::bigint  AS applications_pending,
+    (SELECT COUNT(*) FROM applications a WHERE a.user_id = u.id AND a.status = 'rejected')::bigint AS applications_rejected,
+    (SELECT COUNT(*) FROM applications a WHERE a.user_id = u.id AND a.status = 'cancelled')::bigint AS applications_cancelled
+FROM users u
+WHERE u.id = $1
+`
+
+type AdminGetUserDetailsRow struct {
+	ID                    uuid.UUID   `json:"id"`
+	Email                 string      `json:"email"`
+	Username              string      `json:"username"`
+	Gender                *string     `json:"gender"`
+	BirthDate             pgtype.Date `json:"birth_date"`
+	ShowAge               bool        `json:"show_age"`
+	City                  *string     `json:"city"`
+	Bio                   *string     `json:"bio"`
+	Hobbies               []string    `json:"hobbies"`
+	Telegram              *string     `json:"telegram"`
+	Vk                    *string     `json:"vk"`
+	AvatarUrl             *string     `json:"avatar_url"`
+	Role                  string      `json:"role"`
+	IsBanned              bool        `json:"is_banned"`
+	BanReason             *string     `json:"ban_reason"`
+	BanExpiresAt          *time.Time  `json:"ban_expires_at"`
+	EmailVerified         bool        `json:"email_verified"`
+	ConsentAt             *time.Time  `json:"consent_at"`
+	ConsentVersion        *string     `json:"consent_version"`
+	AgeConfirmedAt        *time.Time  `json:"age_confirmed_at"`
+	CreatedAt             time.Time   `json:"created_at"`
+	UpdatedAt             time.Time   `json:"updated_at"`
+	OrganizedEventsCount  int64       `json:"organized_events_count"`
+	ApplicationsTotal     int64       `json:"applications_total"`
+	ApplicationsApproved  int64       `json:"applications_approved"`
+	ApplicationsPending   int64       `json:"applications_pending"`
+	ApplicationsRejected  int64       `json:"applications_rejected"`
+	ApplicationsCancelled int64       `json:"applications_cancelled"`
+}
+
+func (q *Queries) AdminGetUserDetails(ctx context.Context, id uuid.UUID) (AdminGetUserDetailsRow, error) {
+	row := q.db.QueryRow(ctx, adminGetUserDetails, id)
+	var i AdminGetUserDetailsRow
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.Username,
+		&i.Gender,
+		&i.BirthDate,
+		&i.ShowAge,
+		&i.City,
+		&i.Bio,
+		&i.Hobbies,
+		&i.Telegram,
+		&i.Vk,
+		&i.AvatarUrl,
+		&i.Role,
+		&i.IsBanned,
+		&i.BanReason,
+		&i.BanExpiresAt,
+		&i.EmailVerified,
+		&i.ConsentAt,
+		&i.ConsentVersion,
+		&i.AgeConfirmedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OrganizedEventsCount,
+		&i.ApplicationsTotal,
+		&i.ApplicationsApproved,
+		&i.ApplicationsPending,
+		&i.ApplicationsRejected,
+		&i.ApplicationsCancelled,
+	)
+	return i, err
+}
+
+const adminGetUserRole = `-- name: AdminGetUserRole :one
+SELECT id, role, is_banned FROM users WHERE id = $1
+`
+
+type AdminGetUserRoleRow struct {
+	ID       uuid.UUID `json:"id"`
+	Role     string    `json:"role"`
+	IsBanned bool      `json:"is_banned"`
+}
+
+func (q *Queries) AdminGetUserRole(ctx context.Context, id uuid.UUID) (AdminGetUserRoleRow, error) {
+	row := q.db.QueryRow(ctx, adminGetUserRole, id)
+	var i AdminGetUserRoleRow
+	err := row.Scan(&i.ID, &i.Role, &i.IsBanned)
+	return i, err
+}
+
+const adminInsertAuditLog = `-- name: AdminInsertAuditLog :one
+INSERT INTO admin_audit_log (admin_id, admin_email, action, target_type, target_id, details)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, admin_id, admin_email, action, target_type, target_id, details, created_at
+`
+
+type AdminInsertAuditLogParams struct {
+	AdminID    *uuid.UUID       `json:"admin_id"`
+	AdminEmail string           `json:"admin_email"`
+	Action     string           `json:"action"`
+	TargetType string           `json:"target_type"`
+	TargetID   *uuid.UUID       `json:"target_id"`
+	Details    *json.RawMessage `json:"details"`
+}
+
+func (q *Queries) AdminInsertAuditLog(ctx context.Context, arg AdminInsertAuditLogParams) (AdminAuditLog, error) {
+	row := q.db.QueryRow(ctx, adminInsertAuditLog,
+		arg.AdminID,
+		arg.AdminEmail,
+		arg.Action,
+		arg.TargetType,
+		arg.TargetID,
+		arg.Details,
+	)
+	var i AdminAuditLog
+	err := row.Scan(
+		&i.ID,
+		&i.AdminID,
+		&i.AdminEmail,
+		&i.Action,
+		&i.TargetType,
+		&i.TargetID,
+		&i.Details,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const adminListAuditLog = `-- name: AdminListAuditLog :many
+SELECT id, admin_id, admin_email, action, target_type, target_id, details, created_at FROM admin_audit_log
+WHERE ($3::uuid IS NULL OR admin_id = $3)
+  AND ($4::text IS NULL OR action = $4)
+  AND ($5::text IS NULL OR target_type = $5)
+ORDER BY created_at DESC
+LIMIT $1 OFFSET $2
+`
+
+type AdminListAuditLogParams struct {
+	Limit      int32      `json:"limit"`
+	Offset     int32      `json:"offset"`
+	AdminID    *uuid.UUID `json:"admin_id"`
+	Action     *string    `json:"action"`
+	TargetType *string    `json:"target_type"`
+}
+
+func (q *Queries) AdminListAuditLog(ctx context.Context, arg AdminListAuditLogParams) ([]AdminAuditLog, error) {
+	rows, err := q.db.Query(ctx, adminListAuditLog,
+		arg.Limit,
+		arg.Offset,
+		arg.AdminID,
+		arg.Action,
+		arg.TargetType,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AdminAuditLog{}
+	for rows.Next() {
+		var i AdminAuditLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.AdminID,
+			&i.AdminEmail,
+			&i.Action,
+			&i.TargetType,
+			&i.TargetID,
+			&i.Details,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const adminListEvents = `-- name: AdminListEvents :many
-SELECT e.id, e.title, e.city, e.category, e.starts_at, e.status, e.organizer_id,
-       u.username AS organizer_name
+SELECT 
+    e.id, e.title, e.city, e.category, e.starts_at, e.status,
+    e.organizer_id, e.hidden, e.created_at,
+    u.username AS organizer_name,
+    (SELECT COUNT(*) FROM applications a WHERE a.event_id = e.id AND a.status = 'approved')::bigint AS participants_count,
+    (SELECT COUNT(*) FROM applications a WHERE a.event_id = e.id AND a.status = 'pending')::bigint AS pending_count
 FROM events e
 JOIN users u ON u.id = e.organizer_id
 WHERE ($3::text IS NULL OR e.status = $3)
+  AND ($4::text IS NULL OR e.title ILIKE '%' || $4 || '%')
+  AND ($5::text IS NULL OR e.category = $5)
+  AND ($6::text IS NULL OR e.city = $6)
 ORDER BY e.created_at DESC
 LIMIT $1 OFFSET $2
 `
 
 type AdminListEventsParams struct {
-	Limit  int32   `json:"limit"`
-	Offset int32   `json:"offset"`
-	Status *string `json:"status"`
+	Limit    int32   `json:"limit"`
+	Offset   int32   `json:"offset"`
+	Status   *string `json:"status"`
+	Search   *string `json:"search"`
+	Category *string `json:"category"`
+	City     *string `json:"city"`
 }
 
 type AdminListEventsRow struct {
-	ID            uuid.UUID `json:"id"`
-	Title         string    `json:"title"`
-	City          string    `json:"city"`
-	Category      string    `json:"category"`
-	StartsAt      time.Time `json:"starts_at"`
-	Status        string    `json:"status"`
-	OrganizerID   uuid.UUID `json:"organizer_id"`
-	OrganizerName string    `json:"organizer_name"`
+	ID                uuid.UUID `json:"id"`
+	Title             string    `json:"title"`
+	City              string    `json:"city"`
+	Category          string    `json:"category"`
+	StartsAt          time.Time `json:"starts_at"`
+	Status            string    `json:"status"`
+	OrganizerID       uuid.UUID `json:"organizer_id"`
+	Hidden            bool      `json:"hidden"`
+	CreatedAt         time.Time `json:"created_at"`
+	OrganizerName     string    `json:"organizer_name"`
+	ParticipantsCount int64     `json:"participants_count"`
+	PendingCount      int64     `json:"pending_count"`
 }
 
 func (q *Queries) AdminListEvents(ctx context.Context, arg AdminListEventsParams) ([]AdminListEventsRow, error) {
-	rows, err := q.db.Query(ctx, adminListEvents, arg.Limit, arg.Offset, arg.Status)
+	rows, err := q.db.Query(ctx, adminListEvents,
+		arg.Limit,
+		arg.Offset,
+		arg.Status,
+		arg.Search,
+		arg.Category,
+		arg.City,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +441,11 @@ func (q *Queries) AdminListEvents(ctx context.Context, arg AdminListEventsParams
 			&i.StartsAt,
 			&i.Status,
 			&i.OrganizerID,
+			&i.Hidden,
+			&i.CreatedAt,
 			&i.OrganizerName,
+			&i.ParticipantsCount,
+			&i.PendingCount,
 		); err != nil {
 			return nil, err
 		}

@@ -12,6 +12,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AdminAuditLog struct {
+	ID         uuid.UUID        `json:"id"`
+	AdminID    *uuid.UUID       `json:"admin_id"`
+	AdminEmail string           `json:"admin_email"`
+	Action     string           `json:"action"`
+	TargetType string           `json:"target_type"`
+	TargetID   *uuid.UUID       `json:"target_id"`
+	Details    *json.RawMessage `json:"details"`
+	CreatedAt  time.Time        `json:"created_at"`
+}
+
 type Application struct {
 	ID           uuid.UUID `json:"id"`
 	EventID      uuid.UUID `json:"event_id"`
@@ -39,13 +50,16 @@ type ChatRead struct {
 }
 
 type Complaint struct {
-	ID         uuid.UUID `json:"id"`
-	ReporterID uuid.UUID `json:"reporter_id"`
-	TargetType string    `json:"target_type"`
-	TargetID   uuid.UUID `json:"target_id"`
-	Reason     string    `json:"reason"`
-	Status     string    `json:"status"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID                uuid.UUID  `json:"id"`
+	ReporterID        uuid.UUID  `json:"reporter_id"`
+	TargetType        string     `json:"target_type"`
+	TargetID          uuid.UUID  `json:"target_id"`
+	Reason            string     `json:"reason"`
+	Status            string     `json:"status"`
+	CreatedAt         time.Time  `json:"created_at"`
+	ResolutionComment *string    `json:"resolution_comment"`
+	ResolvedAt        *time.Time `json:"resolved_at"`
+	ResolvedBy        *uuid.UUID `json:"resolved_by"`
 }
 
 type Event struct {
@@ -66,6 +80,7 @@ type Event struct {
 	CancelReason      *string       `json:"cancel_reason"`
 	CreatedAt         time.Time     `json:"created_at"`
 	UpdatedAt         time.Time     `json:"updated_at"`
+	Hidden            bool          `json:"hidden"`
 }
 
 type Notification struct {
@@ -78,33 +93,58 @@ type Notification struct {
 }
 
 type SupportTicket struct {
-	ID        uuid.UUID  `json:"id"`
-	UserID    *uuid.UUID `json:"user_id"`
-	Type      string     `json:"type"`
-	Subject   string     `json:"subject"`
-	Message   string     `json:"message"`
-	Status    string     `json:"status"`
-	CreatedAt time.Time  `json:"created_at"`
+	ID                uuid.UUID  `json:"id"`
+	UserID            *uuid.UUID `json:"user_id"`
+	Type              string     `json:"type"`
+	Subject           string     `json:"subject"`
+	Message           string     `json:"message"`
+	Status            string     `json:"status"`
+	CreatedAt         time.Time  `json:"created_at"`
+	ComplaintID       *uuid.UUID `json:"complaint_id"`
+	ResolutionComment *string    `json:"resolution_comment"`
+	ResolvedAt        *time.Time `json:"resolved_at"`
+	ResolvedBy        *uuid.UUID `json:"resolved_by"`
+}
+
+type TicketReply struct {
+	ID         uuid.UUID  `json:"id"`
+	TicketID   uuid.UUID  `json:"ticket_id"`
+	AdminID    *uuid.UUID `json:"admin_id"`
+	AdminEmail string     `json:"admin_email"`
+	Body       string     `json:"body"`
+	CreatedAt  time.Time  `json:"created_at"`
 }
 
 type User struct {
-	ID            uuid.UUID   `json:"id"`
-	Email         string      `json:"email"`
-	PasswordHash  string      `json:"password_hash"`
-	Username      string      `json:"username"`
-	Gender        *string     `json:"gender"`
-	BirthDate     pgtype.Date `json:"birth_date"`
-	ShowAge       bool        `json:"show_age"`
-	City          *string     `json:"city"`
-	Bio           *string     `json:"bio"`
-	Hobbies       []string    `json:"hobbies"`
-	Telegram      *string     `json:"telegram"`
-	Vk            *string     `json:"vk"`
-	AvatarUrl     *string     `json:"avatar_url"`
-	Role          string      `json:"role"`
-	IsBanned      bool        `json:"is_banned"`
-	BanReason     *string     `json:"ban_reason"`
-	EmailVerified bool        `json:"email_verified"`
-	CreatedAt     time.Time   `json:"created_at"`
-	UpdatedAt     time.Time   `json:"updated_at"`
+	ID                uuid.UUID   `json:"id"`
+	Email             string      `json:"email"`
+	PasswordHash      string      `json:"password_hash"`
+	Username          string      `json:"username"`
+	Gender            *string     `json:"gender"`
+	BirthDate         pgtype.Date `json:"birth_date"`
+	ShowAge           bool        `json:"show_age"`
+	City              *string     `json:"city"`
+	Bio               *string     `json:"bio"`
+	Hobbies           []string    `json:"hobbies"`
+	Telegram          *string     `json:"telegram"`
+	Vk                *string     `json:"vk"`
+	AvatarUrl         *string     `json:"avatar_url"`
+	Role              string      `json:"role"`
+	IsBanned          bool        `json:"is_banned"`
+	BanReason         *string     `json:"ban_reason"`
+	EmailVerified     bool        `json:"email_verified"`
+	CreatedAt         time.Time   `json:"created_at"`
+	UpdatedAt         time.Time   `json:"updated_at"`
+	ConsentAt         *time.Time  `json:"consent_at"`
+	ConsentVersion    *string     `json:"consent_version"`
+	AgeConfirmedAt    *time.Time  `json:"age_confirmed_at"`
+	BanExpiresAt      *time.Time  `json:"ban_expires_at"`
+	UsernameChangedAt *time.Time  `json:"username_changed_at"`
+}
+
+type UsernameHistory struct {
+	ID          uuid.UUID `json:"id"`
+	UserID      uuid.UUID `json:"user_id"`
+	OldUsername string    `json:"old_username"`
+	ChangedAt   time.Time `json:"changed_at"`
 }

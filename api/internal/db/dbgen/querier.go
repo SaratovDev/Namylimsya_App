@@ -14,44 +14,113 @@ import (
 type Querier interface {
 	AdminActivityChart(ctx context.Context) ([]AdminActivityChartRow, error)
 	AdminBanUser(ctx context.Context, arg AdminBanUserParams) (AdminBanUserRow, error)
+	AdminCancelEvent(ctx context.Context, arg AdminCancelEventParams) (Event, error)
 	AdminDashboardApplications(ctx context.Context) (AdminDashboardApplicationsRow, error)
 	AdminDashboardEvents(ctx context.Context) (AdminDashboardEventsRow, error)
 	AdminDashboardUsers(ctx context.Context) (AdminDashboardUsersRow, error)
 	AdminDeleteEvent(ctx context.Context, id uuid.UUID) error
+	AdminGetComplaintTargetEvent(ctx context.Context, id uuid.UUID) (AdminGetComplaintTargetEventRow, error)
+	AdminGetComplaintTargetMessage(ctx context.Context, id uuid.UUID) (AdminGetComplaintTargetMessageRow, error)
+	AdminGetComplaintTargetUser(ctx context.Context, id uuid.UUID) (AdminGetComplaintTargetUserRow, error)
+	AdminGetEventDetails(ctx context.Context, id uuid.UUID) (AdminGetEventDetailsRow, error)
+	AdminGetRecentMessages(ctx context.Context, arg AdminGetRecentMessagesParams) ([]AdminGetRecentMessagesRow, error)
+	AdminGetUserDetails(ctx context.Context, id uuid.UUID) (AdminGetUserDetailsRow, error)
+	AdminGetUserRole(ctx context.Context, id uuid.UUID) (AdminGetUserRoleRow, error)
+	AdminHideEvent(ctx context.Context, id uuid.UUID) (AdminHideEventRow, error)
+	AdminInsertAuditLog(ctx context.Context, arg AdminInsertAuditLogParams) (AdminAuditLog, error)
+	AdminListAuditLog(ctx context.Context, arg AdminListAuditLogParams) ([]AdminAuditLog, error)
 	AdminListEvents(ctx context.Context, arg AdminListEventsParams) ([]AdminListEventsRow, error)
 	AdminListUsers(ctx context.Context, arg AdminListUsersParams) ([]AdminListUsersRow, error)
+	AdminSoftDeleteMessage(ctx context.Context, id uuid.UUID) (AdminSoftDeleteMessageRow, error)
 	AdminTopCategories(ctx context.Context) ([]AdminTopCategoriesRow, error)
 	AdminTopOrganizers(ctx context.Context) ([]AdminTopOrganizersRow, error)
+	AdminUnhideEvent(ctx context.Context, id uuid.UUID) (AdminUnhideEventRow, error)
 	AdminUpdateUserRole(ctx context.Context, arg AdminUpdateUserRoleParams) (AdminUpdateUserRoleRow, error)
+	// Каскадная отмена при отмене события.
+	CancelAllActiveApplicationsForEvent(ctx context.Context, arg CancelAllActiveApplicationsForEventParams) error
 	CancelEvent(ctx context.Context, arg CancelEventParams) (Event, error)
 	CountActiveApplicationsByUser(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountActiveEventsByOrganizer(ctx context.Context, organizerID uuid.UUID) (int64, error)
 	CountApprovedApplicationsForEvent(ctx context.Context, eventID uuid.UUID) (int64, error)
+	CountSupportTickets(ctx context.Context) (int64, error)
 	CountUnreadMessages(ctx context.Context, arg CountUnreadMessagesParams) (int64, error)
 	CountUnreadNotifications(ctx context.Context, userID uuid.UUID) (int64, error)
 	CreateApplication(ctx context.Context, arg CreateApplicationParams) (Application, error)
+	CreateComplaint(ctx context.Context, arg CreateComplaintParams) (Complaint, error)
+	CreateComplaintSupportTicket(ctx context.Context, arg CreateComplaintSupportTicketParams) (SupportTicket, error)
 	CreateEvent(ctx context.Context, arg CreateEventParams) (Event, error)
 	CreateMessage(ctx context.Context, arg CreateMessageParams) (ChatMessage, error)
 	CreateNotification(ctx context.Context, arg CreateNotificationParams) (Notification, error)
+	CreateSupportTicket(ctx context.Context, arg CreateSupportTicketParams) (SupportTicket, error)
+	CreateTicketReply(ctx context.Context, arg CreateTicketReplyParams) (TicketReply, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	GetApplication(ctx context.Context, id uuid.UUID) (Application, error)
-	GetEventByID(ctx context.Context, id uuid.UUID) (Event, error)
+	GetComplaint(ctx context.Context, id uuid.UUID) (GetComplaintRow, error)
+	GetEventByID(ctx context.Context, arg GetEventByIDParams) (GetEventByIDRow, error)
+	// Блокирует строку события до конца транзакции. Используется в Apply и Approve
+	// для сериализации операций, меняющих состояние заявок на это событие.
+	GetEventForUpdate(ctx context.Context, id uuid.UUID) (Event, error)
 	GetEventsArchive(ctx context.Context, arg GetEventsArchiveParams) ([]GetEventsArchiveRow, error)
 	GetEventsFeed(ctx context.Context, arg GetEventsFeedParams) ([]GetEventsFeedRow, error)
 	GetLastRead(ctx context.Context, arg GetLastReadParams) (time.Time, error)
 	GetMessages(ctx context.Context, arg GetMessagesParams) ([]GetMessagesRow, error)
+	GetMyOrganizedEvents(ctx context.Context, organizerID uuid.UUID) ([]GetMyOrganizedEventsRow, error)
 	GetNotifications(ctx context.Context, arg GetNotificationsParams) ([]Notification, error)
 	GetPublicUser(ctx context.Context, id uuid.UUID) (GetPublicUserRow, error)
+	// Расширенный публичный профиль: базовые поля + счётчики + роль/бан.
+	// Используется на /users/[id]. Старый GetPublicUser оставляем для
+	// мест, где counts не нужны (пока таких нет, но не ломаем API).
+	GetPublicUserFull(ctx context.Context, id uuid.UUID) (GetPublicUserFullRow, error)
+	GetSupportTicket(ctx context.Context, id uuid.UUID) (GetSupportTicketRow, error)
 	GetUserApplicationForEvent(ctx context.Context, arg GetUserApplicationForEventParams) (Application, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
+	GetUsernameHistory(ctx context.Context, userID uuid.UUID) ([]GetUsernameHistoryRow, error)
+	InsertUsernameHistory(ctx context.Context, arg InsertUsernameHistoryParams) error
+	// Pending + approved заявки. Для уведомлений перед каскадной отменой.
+	ListActiveApplicationsForEvent(ctx context.Context, eventID uuid.UUID) ([]Application, error)
+	ListApplicationsByUser(ctx context.Context, userID uuid.UUID) ([]ListApplicationsByUserRow, error)
 	ListApprovedForEvent(ctx context.Context, eventID uuid.UUID) ([]Application, error)
+	// Участники события со статусом approved. Организатор — всегда первый.
+	// Pending/rejected/cancelled НЕ возвращаются (pending виден только орг
+	// через /events/{id}/applications).
+	ListApprovedParticipants(ctx context.Context, eventID uuid.UUID) ([]ListApprovedParticipantsRow, error)
+	ListComplaints(ctx context.Context, arg ListComplaintsParams) ([]ListComplaintsRow, error)
 	ListEventApplications(ctx context.Context, eventID uuid.UUID) ([]ListEventApplicationsRow, error)
+	ListSupportTickets(ctx context.Context, arg ListSupportTicketsParams) ([]ListSupportTicketsRow, error)
+	ListTicketReplies(ctx context.Context, ticketID uuid.UUID) ([]TicketReply, error)
+	// Завершённые события, куда юзер был approved. Пока без QR-чекина —
+	// «посетил» = «был одобрен». После A3 (QR) заменим на attendance.
+	ListUserAttendedCompleted(ctx context.Context, arg ListUserAttendedCompletedParams) ([]ListUserAttendedCompletedRow, error)
+	// Завершённые события, которые юзер организовал и на которые были
+	// одобренные участники. Отменённые — не включаем.
+	ListUserOrganizedCompleted(ctx context.Context, arg ListUserOrganizedCompletedParams) ([]ListUserOrganizedCompletedRow, error)
 	MarkAllNotificationsRead(ctx context.Context, userID uuid.UUID) error
 	MarkChatRead(ctx context.Context, arg MarkChatReadParams) error
 	MarkNotificationRead(ctx context.Context, arg MarkNotificationReadParams) error
+	// Событие считается завершённым через 2 часа после старта (дефолтная
+	// длительность). Пока этот интервал не истёк, событие видно в архиве
+	// с плашкой «идёт сейчас». Если появится ends_at — заменить на него.
+	MarkPastEventsCompleted(ctx context.Context) error
+	RejectComplaint(ctx context.Context, arg RejectComplaintParams) (Complaint, error)
+	RejectSupportTicket(ctx context.Context, arg RejectSupportTicketParams) (SupportTicket, error)
+	ResolveComplaint(ctx context.Context, arg ResolveComplaintParams) (Complaint, error)
+	ResolveSupportTicket(ctx context.Context, arg ResolveSupportTicketParams) (SupportTicket, error)
+	// Снимает is_banned с пользователей, у которых истёк ban_expires_at.
+	// Вызывается фоновым воркером раз в несколько минут, чтобы БД не копила
+	// «зомби»-забаненных и Login/Refresh не путались.
+	UnbanExpiredUsers(ctx context.Context) error
+	// allowed_from — допустимые исходные статусы. WHERE status = ANY(...) защищает
+	// от гонки: если параллельный запрос уже сменил статус, UPDATE не затронет
+	// строку и вернёт pgx.ErrNoRows — вызывающий код маппит в бизнес-ошибку.
+	// Без этого Reject+Approve одновременно оба "выигрывали" и оба слали уведомления.
 	UpdateApplicationStatus(ctx context.Context, arg UpdateApplicationStatusParams) (Application, error)
+	UpdateEvent(ctx context.Context, arg UpdateEventParams) (Event, error)
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
+	// Полное обновление профиля (включая username с проверкой «один раз»).
+	// username передаётся уже валидированным в сервисе.
+	UpdateUserFull(ctx context.Context, arg UpdateUserFullParams) (User, error)
+	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
 }
 
 var _ Querier = (*Queries)(nil)

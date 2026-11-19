@@ -12,9 +12,32 @@ import (
 	"github.com/google/uuid"
 )
 
+const cancelAllActiveApplicationsForEvent = `-- name: CancelAllActiveApplicationsForEvent :exec
+UPDATE applications
+SET status = 'cancelled',
+    cancel_reason = COALESCE($2::text, 'event_cancelled'),
+    updated_at = now()
+WHERE event_id = $1 AND status IN ('pending', 'approved')
+`
+
+type CancelAllActiveApplicationsForEventParams struct {
+	EventID      uuid.UUID `json:"event_id"`
+	CancelReason *string   `json:"cancel_reason"`
+}
+
+// Каскадная отмена при отмене события.
+func (q *Queries) CancelAllActiveApplicationsForEvent(ctx context.Context, arg CancelAllActiveApplicationsForEventParams) error {
+	_, err := q.db.Exec(ctx, cancelAllActiveApplicationsForEvent, arg.EventID, arg.CancelReason)
+	return err
+}
+
 const countActiveApplicationsByUser = `-- name: CountActiveApplicationsByUser :one
-SELECT COUNT(*) FROM applications 
-WHERE user_id = $1 AND status IN ('pending', 'approved')
+SELECT COUNT(*) FROM applications a
+JOIN events e ON e.id = a.event_id
+WHERE a.user_id = $1
+  AND a.status IN ('pending', 'approved')
+  AND e.status = 'active'
+  AND e.starts_at > now()
 `
 
 func (q *Queries) CountActiveApplicationsByUser(ctx context.Context, userID uuid.UUID) (int64, error) {
@@ -81,6 +104,38 @@ func (q *Queries) GetApplication(ctx context.Context, id uuid.UUID) (Application
 	return i, err
 }
 
+const getEventForUpdate = `-- name: GetEventForUpdate :one
+SELECT id, organizer_id, title, category, description, starts_at, city, address, lat, lng, location, hide_exact_location, participant_limit, status, cancel_reason, created_at, updated_at, hidden FROM events WHERE id = $1 FOR UPDATE
+`
+
+// Блокирует строку события до конца транзакции. Используется в Apply и Approve
+// для сериализации операций, меняющих состояние заявок на это событие.
+func (q *Queries) GetEventForUpdate(ctx context.Context, id uuid.UUID) (Event, error) {
+	row := q.db.QueryRow(ctx, getEventForUpdate, id)
+	var i Event
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizerID,
+		&i.Title,
+		&i.Category,
+		&i.Description,
+		&i.StartsAt,
+		&i.City,
+		&i.Address,
+		&i.Lat,
+		&i.Lng,
+		&i.Location,
+		&i.HideExactLocation,
+		&i.ParticipantLimit,
+		&i.Status,
+		&i.CancelReason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Hidden,
+	)
+	return i, err
+}
+
 const getUserApplicationForEvent = `-- name: GetUserApplicationForEvent :one
 SELECT id, event_id, user_id, status, cancel_reason, created_at, updated_at FROM applications 
 WHERE event_id = $1 AND user_id = $2
@@ -104,6 +159,116 @@ func (q *Queries) GetUserApplicationForEvent(ctx context.Context, arg GetUserApp
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listActiveApplicationsForEvent = `-- name: ListActiveApplicationsForEvent :many
+SELECT id, event_id, user_id, status, cancel_reason, created_at, updated_at FROM applications
+WHERE event_id = $1 AND status IN ('pending', 'approved')
+ORDER BY created_at ASC
+`
+
+// Pending + approved заявки. Для уведомлений перед каскадной отменой.
+func (q *Queries) ListActiveApplicationsForEvent(ctx context.Context, eventID uuid.UUID) ([]Application, error) {
+	rows, err := q.db.Query(ctx, listActiveApplicationsForEvent, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Application{}
+	for rows.Next() {
+		var i Application
+		if err := rows.Scan(
+			&i.ID,
+			&i.EventID,
+			&i.UserID,
+			&i.Status,
+			&i.CancelReason,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listApplicationsByUser = `-- name: ListApplicationsByUser :many
+SELECT 
+    a.id, a.event_id, a.user_id, a.status, a.cancel_reason, a.created_at, a.updated_at,
+    e.title           AS event_title,
+    e.starts_at       AS event_starts_at,
+    e.city            AS event_city,
+    e.category        AS event_category,
+    e.status          AS event_status,
+    e.cancel_reason   AS event_cancel_reason,
+    e.organizer_id    AS event_organizer_id,
+    u.username        AS organizer_name,
+    u.avatar_url      AS organizer_avatar
+FROM applications a
+JOIN events e ON e.id = a.event_id
+JOIN users u ON u.id = e.organizer_id
+WHERE a.user_id = $1
+ORDER BY a.created_at DESC
+`
+
+type ListApplicationsByUserRow struct {
+	ID                uuid.UUID `json:"id"`
+	EventID           uuid.UUID `json:"event_id"`
+	UserID            uuid.UUID `json:"user_id"`
+	Status            string    `json:"status"`
+	CancelReason      *string   `json:"cancel_reason"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+	EventTitle        string    `json:"event_title"`
+	EventStartsAt     time.Time `json:"event_starts_at"`
+	EventCity         string    `json:"event_city"`
+	EventCategory     string    `json:"event_category"`
+	EventStatus       string    `json:"event_status"`
+	EventCancelReason *string   `json:"event_cancel_reason"`
+	EventOrganizerID  uuid.UUID `json:"event_organizer_id"`
+	OrganizerName     string    `json:"organizer_name"`
+	OrganizerAvatar   *string   `json:"organizer_avatar"`
+}
+
+func (q *Queries) ListApplicationsByUser(ctx context.Context, userID uuid.UUID) ([]ListApplicationsByUserRow, error) {
+	rows, err := q.db.Query(ctx, listApplicationsByUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListApplicationsByUserRow{}
+	for rows.Next() {
+		var i ListApplicationsByUserRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.EventID,
+			&i.UserID,
+			&i.Status,
+			&i.CancelReason,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.EventTitle,
+			&i.EventStartsAt,
+			&i.EventCity,
+			&i.EventCategory,
+			&i.EventStatus,
+			&i.EventCancelReason,
+			&i.EventOrganizerID,
+			&i.OrganizerName,
+			&i.OrganizerAvatar,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listApprovedForEvent = `-- name: ListApprovedForEvent :many
@@ -193,6 +358,7 @@ const updateApplicationStatus = `-- name: UpdateApplicationStatus :one
 UPDATE applications
 SET status = $2, cancel_reason = $3, updated_at = now()
 WHERE id = $1
+  AND status = ANY($4::text[])
 RETURNING id, event_id, user_id, status, cancel_reason, created_at, updated_at
 `
 
@@ -200,10 +366,20 @@ type UpdateApplicationStatusParams struct {
 	ID           uuid.UUID `json:"id"`
 	Status       string    `json:"status"`
 	CancelReason *string   `json:"cancel_reason"`
+	AllowedFrom  []string  `json:"allowed_from"`
 }
 
+// allowed_from — допустимые исходные статусы. WHERE status = ANY(...) защищает
+// от гонки: если параллельный запрос уже сменил статус, UPDATE не затронет
+// строку и вернёт pgx.ErrNoRows — вызывающий код маппит в бизнес-ошибку.
+// Без этого Reject+Approve одновременно оба "выигрывали" и оба слали уведомления.
 func (q *Queries) UpdateApplicationStatus(ctx context.Context, arg UpdateApplicationStatusParams) (Application, error) {
-	row := q.db.QueryRow(ctx, updateApplicationStatus, arg.ID, arg.Status, arg.CancelReason)
+	row := q.db.QueryRow(ctx, updateApplicationStatus,
+		arg.ID,
+		arg.Status,
+		arg.CancelReason,
+		arg.AllowedFrom,
+	)
 	var i Application
 	err := row.Scan(
 		&i.ID,

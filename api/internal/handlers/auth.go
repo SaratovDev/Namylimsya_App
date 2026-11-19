@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"html"
 	"net/http"
 
 	"github.com/SaratovDev/Namylimsya_App/api/internal/config"
@@ -86,6 +87,25 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		log.Error().Err(err).Msg("register failed")
 		httpx.InternalError(w, err)
 		return
+	}
+
+	// Если верификация включена — отправляем письмо со ссылкой подтверждения.
+	if h.cfg.EmailVerificationEnabled {
+		token, err := h.svc.CreateVerificationToken(r.Context(), user.ID)
+		if err != nil {
+			log.Error().Err(err).Str("user_id", user.ID.String()).Msg("create verification token")
+		} else {
+			link := h.cfg.PublicBaseURL + "/verify-email?token=" + token
+			body := "<p>Здравствуйте, " + html.EscapeString(user.Username) + "!</p>" +
+				"<p>Подтвердите email, чтобы ваш аккаунт на «Намылимся» был защищён.</p>" +
+				"<p><a href=\"" + html.EscapeString(link) + "\">Подтвердить email</a></p>" +
+				"<p>Ссылка действует 24 часа. Если вы не регистрировались — проигнорируйте письмо.</p>"
+			_ = h.mailer.Send(r.Context(), email.Message{
+				To:      user.Email,
+				Subject: "Подтвердите email — Намылимся",
+				Body:    body,
+			})
+		}
 	}
 
 	httpx.JSON(w, http.StatusCreated, map[string]any{
@@ -210,10 +230,62 @@ func toPublicUser(u *dbgen.User) map[string]any {
 		"vk":                  u.Vk,
 		"avatar_url":          u.AvatarUrl,
 		"role":                u.Role,
+		"email_verified":      u.EmailVerified,
 		"username_changed_at": u.UsernameChangedAt,
 		"created_at":          u.CreatedAt,
 		"updated_at":          u.UpdatedAt,
 	}
+}
+
+// ─── Email verification ────────────────────────────────────────────
+
+// VerifyEmail — GET /auth/verify-email?token=...
+func (h *AuthHandler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	if err := h.svc.VerifyEmail(r.Context(), token); err != nil {
+		if errors.Is(err, services.ErrInvalidVerificationToken) {
+			httpx.Error(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
+		httpx.InternalError(w, err)
+		return
+	}
+	httpx.OK(w, map[string]string{"message": "Email подтверждён"})
+}
+
+// ResendVerification — POST /auth/resend-verification (авторизованный).
+func (h *AuthHandler) ResendVerification(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthorized", "")
+		return
+	}
+	user, err := h.svc.GetUserByID(r.Context(), userID)
+	if err != nil {
+		httpx.Error(w, http.StatusNotFound, "not_found", "user not found")
+		return
+	}
+	if user.EmailVerified {
+		httpx.OK(w, map[string]string{"message": "Email уже подтверждён"})
+		return
+	}
+
+	token, err := h.svc.CreateVerificationToken(r.Context(), userID)
+	if err != nil {
+		httpx.InternalError(w, err)
+		return
+	}
+	link := h.cfg.PublicBaseURL + "/verify-email?token=" + token
+	body := "<p>Здравствуйте, " + html.EscapeString(user.Username) + "!</p>" +
+		"<p>Подтвердите email на «Намылимся».</p>" +
+		"<p><a href=\"" + html.EscapeString(link) + "\">Подтвердить email</a></p>" +
+		"<p>Ссылка действует 24 часа.</p>"
+	_ = h.mailer.Send(r.Context(), email.Message{
+		To:      user.Email,
+		Subject: "Подтвердите email — Намылимся",
+		Body:    body,
+	})
+	httpx.OK(w, map[string]string{"message": "Письмо отправлено"})
 }
 
 // ─── Password reset ────────────────────────────────────────────────

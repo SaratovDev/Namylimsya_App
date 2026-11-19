@@ -424,6 +424,15 @@ func (q *Queries) ListUserOrganizedCompleted(ctx context.Context, arg ListUserOr
 	return items, nil
 }
 
+const markEmailVerified = `-- name: MarkEmailVerified :exec
+UPDATE users SET email_verified = true, updated_at = now() WHERE id = $1
+`
+
+func (q *Queries) MarkEmailVerified(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, markEmailVerified, id)
+	return err
+}
+
 const unbanExpiredUsers = `-- name: UnbanExpiredUsers :exec
 UPDATE users
 SET is_banned = false,

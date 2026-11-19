@@ -117,6 +117,7 @@ func New(deps Deps) chi.Router {
 			r.Post("/logout", deps.Auth.Logout)
 			r.Post("/password-reset-request", deps.Auth.RequestPasswordReset)
 			r.Post("/password-reset", deps.Auth.ResetPassword)
+			r.Get("/verify-email", deps.Auth.VerifyEmail)
 		})
 
 		// --- Защищённые (AuthRequired) ---
@@ -126,6 +127,7 @@ func New(deps Deps) chi.Router {
 			r.Get("/users/me", deps.Auth.Me)
 			r.Patch("/users/me", deps.User.UpdateMe)
 			r.Post("/users/me/avatar", deps.User.UploadAvatar)
+			r.Post("/users/me/resend-verification", deps.Auth.ResendVerification)
 			r.Get("/users/me/events", deps.Event.ListMine)
 			r.Get("/users/me/applications", deps.Application.ListMine)
 

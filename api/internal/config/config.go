@@ -47,6 +47,11 @@ type Config struct {
 		PublicBaseURL string
 	}
 
+	// EmailVerificationEnabled — слать ли письмо подтверждения email при
+	// регистрации (и показывать ли баннер «email не подтверждён»). Для
+	// закрытой беты можно off, перед публичным запуском — on.
+	EmailVerificationEnabled bool
+
 	YandexMapsAPIKey string
 }
 
@@ -122,6 +127,8 @@ func Load() (*Config, error) {
 	cfg.SMTP.Pass = os.Getenv("SMTP_PASS")
 	cfg.SMTP.From = getEnv("SMTP_FROM", "noreply@namylimsya.local")
 	cfg.SMTP.Enabled = getBool("SMTP_ENABLED", false)
+
+	cfg.EmailVerificationEnabled = getBool("EMAIL_VERIFICATION_ENABLED", false)
 
 	cfg.Storage.Driver = getEnv("STORAGE_DRIVER", "local")
 	cfg.Storage.LocalPath = getEnv("STORAGE_LOCAL_PATH", "./storage")

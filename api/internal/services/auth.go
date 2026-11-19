@@ -2,9 +2,10 @@ package services
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/rand"
 	"strings"
 	"time"
 
@@ -29,6 +30,9 @@ var (
 	// Password reset:
 	ErrInvalidResetCode = errors.New("Неверный или истёкший код")
 	ErrTooManyAttempts  = errors.New("Слишком много попыток. Подождите 15 минут.")
+
+	// Email verification:
+	ErrInvalidVerificationToken = errors.New("Неверная или истёкшая ссылка подтверждения")
 )
 
 type AuthService struct {
@@ -59,7 +63,10 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 		return nil
 	}
 
-	code := fmt.Sprintf("%06d", rand.Intn(900000)+100000)
+	code, err := randomSixDigit()
+	if err != nil {
+		return err
+	}
 
 	codeKey := fmt.Sprintf("pwreset:code:%s", emailAddr)
 	if err := s.rdbSet(ctx, codeKey, code, 15*time.Minute); err != nil {
@@ -329,6 +336,41 @@ func (s *AuthService) Logout(ctx context.Context, refreshToken string) error {
 	return s.sm.RevokeRefreshToken(ctx, claims.UserID, claims.ID)
 }
 
+// CreateVerificationToken — генерирует криптостойкий токен, кладёт в Redis
+// (TTL 24 часа) с привязкой к userID, возвращает токен для ссылки в письме.
+func (s *AuthService) CreateVerificationToken(ctx context.Context, userID uuid.UUID) (string, error) {
+	token, err := randomHex(16)
+	if err != nil {
+		return "", err
+	}
+	if err := s.rdbSet(ctx, "email_verify:"+token, userID.String(), 24*time.Hour); err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+// VerifyEmail — по токену из письма подтверждает email и удаляет токен.
+func (s *AuthService) VerifyEmail(ctx context.Context, token string) error {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return ErrInvalidVerificationToken
+	}
+	key := "email_verify:" + token
+	userIDStr, err := s.rdbGet(ctx, key)
+	if err != nil || userIDStr == "" {
+		return ErrInvalidVerificationToken
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return ErrInvalidVerificationToken
+	}
+	if err := s.db.MarkEmailVerified(ctx, userID); err != nil {
+		return err
+	}
+	_ = s.rdbDel(ctx, key)
+	return nil
+}
+
 func (s *AuthService) rdbSet(ctx context.Context, key, val string, ttl time.Duration) error {
 	return s.rdb.Set(ctx, key, val, ttl).Err()
 }
@@ -358,4 +400,23 @@ func (s *AuthService) rdbIncr(ctx context.Context, key string, ttl time.Duration
 		_ = s.rdb.Expire(ctx, key, ttl).Err()
 	}
 	return val, nil
+}
+
+// randomHex — n случайных байт в hex (криптостойкий, для токенов).
+func randomHex(n int) (string, error) {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// randomSixDigit — криптостойкий 6-значный код для сброса пароля.
+func randomSixDigit() (string, error) {
+	b := make([]byte, 3)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	n := int(b[0])<<16 | int(b[1])<<8 | int(b[2]) // 0..16_777_215
+	return fmt.Sprintf("%06d", n%900000+100000), nil
 }

@@ -97,6 +97,7 @@ type Querier interface {
 	ListUserOrganizedCompleted(ctx context.Context, arg ListUserOrganizedCompletedParams) ([]ListUserOrganizedCompletedRow, error)
 	MarkAllNotificationsRead(ctx context.Context, userID uuid.UUID) error
 	MarkChatRead(ctx context.Context, arg MarkChatReadParams) error
+	MarkEmailVerified(ctx context.Context, id uuid.UUID) error
 	MarkNotificationRead(ctx context.Context, arg MarkNotificationReadParams) error
 	// Событие считается завершённым через 2 часа после старта (дефолтная
 	// длительность). Пока этот интервал не истёк, событие видно в архиве

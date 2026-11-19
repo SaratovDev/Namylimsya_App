@@ -41,3 +41,35 @@ func (s *SessionManager) RevokeRefreshToken(ctx context.Context, userID uuid.UUI
 	key := fmt.Sprintf("refresh:%s:%s", userID.String(), jti)
 	return s.rdb.Del(ctx, key).Err()
 }
+
+// RevokeAllForUser удаляет все refresh-токены пользователя (например, при бане).
+func (s *SessionManager) RevokeAllForUser(ctx context.Context, userID uuid.UUID) error {
+	pattern := fmt.Sprintf("refresh:%s:*", userID.String())
+	iter := s.rdb.Scan(ctx, 0, pattern, 100).Iterator()
+	var keys []string
+	for iter.Next(ctx) {
+		keys = append(keys, iter.Val())
+	}
+	if err := iter.Err(); err != nil {
+		return err
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	return s.rdb.Del(ctx, keys...).Err()
+}
+
+const bannedKeyPrefix = "banned:"
+
+func (s *SessionManager) MarkBanned(ctx context.Context, userID uuid.UUID, ttl time.Duration) error {
+	return s.rdb.Set(ctx, bannedKeyPrefix+userID.String(), "1", ttl).Err()
+}
+
+func (s *SessionManager) IsBanned(ctx context.Context, userID uuid.UUID) bool {
+	val, err := s.rdb.Get(ctx, bannedKeyPrefix+userID.String()).Result()
+	return err == nil && val == "1"
+}
+
+func (s *SessionManager) ClearBanned(ctx context.Context, userID uuid.UUID) error {
+	return s.rdb.Del(ctx, bannedKeyPrefix+userID.String()).Err()
+}

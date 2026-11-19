@@ -4,17 +4,27 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
+	"github.com/rs/zerolog/log"
 )
 
 type Config struct {
-	AppEnv   string
-	HTTPPort string
+	AppEnv           string
+	LogLevel         string
+	HTTPPort         string
+	PublicBaseURL    string
+	DisableRateLimit bool // E2E_DISABLE_RATE_LIMIT — для Playwright
 
 	DatabaseURL string
 	RedisURL    string
+
+	// TrustedProxy — true, когда API стоит за reverse-proxy (Caddy, nginx)
+	// и X-Forwarded-For можно доверять (только от private peer'ов — Docker
+	// bridge). false (default) — API напрямую, XFF игнорируется.
+	TrustedProxy bool
 
 	JWT struct {
 		AccessSecret  string
@@ -24,17 +34,18 @@ type Config struct {
 	}
 
 	SMTP struct {
-		Host                    string
-		Port                    string
-		User                    string
-		Pass                    string
-		From                    string
-		EmailVerificationEnabled bool
+		Host    string
+		Port    string
+		User    string
+		Pass    string
+		From    string
+		Enabled bool
 	}
 
 	Storage struct {
-		Driver    string // "local" | "s3"
-		LocalPath string
+		Driver        string
+		LocalPath     string
+		PublicBaseURL string
 	}
 
 	YandexMapsAPIKey string
@@ -42,23 +53,52 @@ type Config struct {
 
 func Load() (*Config, error) {
 	// .env в корне проекта; ищем в текущей, затем в родительских папках.
-	for _, p := range []string{".env", "../.env", "../../.env"} {
-		_ = godotenv.Load(p)
+	// ВАЖНО: CWD у `go test ./internal/integration` — это сама директория пакета,
+	// поэтому ../../../.env (корень репо) тоже нужен в списке.
+	// Останавливаемся на первом найденном, чтобы непредсказуемо не смешивать файлы.
+	for _, p := range []string{".env", "../.env", "../../.env", "../../../.env"} {
+		if _, err := os.Stat(p); err == nil {
+			_ = godotenv.Load(p)
+			break
+		}
+	}
+
+	appEnv := os.Getenv("APP_ENV")
+	if appEnv == "" {
+		// APP_ENV влияет на критичные вещи: валидацию JWT-секретов,
+		// HTTPS-требование PUBLIC_BASE_URL, маскировку err.Error() в 500,
+		// warn про SMTP. Без явного значения любая из этих проверок
+		// молча отключается, и прод ведёт себя как dev. Поэтому
+		// падаем с понятной ошибкой, а не подставляем дефолт.
+		return nil, fmt.Errorf("APP_ENV is required (development | production)")
+	}
+	if appEnv != "development" && appEnv != "production" {
+		return nil, fmt.Errorf("APP_ENV must be 'development' or 'production' (got %q)", appEnv)
 	}
 
 	cfg := &Config{
-		AppEnv:      getEnv("APP_ENV", "development"),
-		HTTPPort:    getEnv("HTTP_PORT", "8080"),
-		DatabaseURL: os.Getenv("DATABASE_URL"),
-		RedisURL:    os.Getenv("REDIS_URL"),
+		AppEnv:        appEnv,
+		LogLevel:      getEnv("LOG_LEVEL", defaultLogLevel(appEnv)),
+		HTTPPort:      getEnv("HTTP_PORT", "8080"),
+		PublicBaseURL: getEnv("PUBLIC_BASE_URL", "http://localhost:3000"), DatabaseURL: os.Getenv("DATABASE_URL"),
+		RedisURL:         os.Getenv("REDIS_URL"),
 		YandexMapsAPIKey: os.Getenv("YANDEX_MAPS_API_KEY"),
 	}
 
 	if cfg.DatabaseURL == "" {
-		return nil, fmt.Errorf("DATABASE_URL is required")
+		return nil, fmt.Errorf("DATABASE_URL is required (create .env in repo root, or pass env explicitly)")
 	}
 	if cfg.RedisURL == "" {
-		return nil, fmt.Errorf("REDIS_URL is required")
+		return nil, fmt.Errorf("REDIS_URL is required (create .env in repo root, or pass env explicitly)")
+	}
+
+	cfg.TrustedProxy = getBool("TRUSTED_PROXY", false)
+	cfg.DisableRateLimit = getBool("E2E_DISABLE_RATE_LIMIT", false)
+
+	// Защита: E2E_DISABLE_RATE_LIMIT в проде выключил бы IP-rate-limit
+	// для всех. Fail при APP_ENV=production.
+	if cfg.IsProd() && cfg.DisableRateLimit {
+		return nil, fmt.Errorf("E2E_DISABLE_RATE_LIMIT=true is not allowed in production")
 	}
 
 	cfg.JWT.AccessSecret = getEnv("JWT_ACCESS_SECRET", "dev_access_secret_change_me")
@@ -66,20 +106,50 @@ func Load() (*Config, error) {
 	cfg.JWT.AccessTTL = getDuration("JWT_ACCESS_TTL", 15*time.Minute)
 	cfg.JWT.RefreshTTL = getDuration("JWT_REFRESH_TTL", 30*24*time.Hour)
 
+	// В проде запрещаем запускаться с дефолтными/короткими секретами —
+	// иначе любой может подписать JWT с role=admin.
+	if cfg.IsProd() {
+		if err := validateProdSecrets(cfg); err != nil {
+			return nil, err
+		}
+		if !strings.HasPrefix(cfg.PublicBaseURL, "https://") {
+			return nil, fmt.Errorf("PUBLIC_BASE_URL must start with https:// in production")
+		}
+	}
+
 	cfg.SMTP.Host = getEnv("SMTP_HOST", "localhost")
 	cfg.SMTP.Port = getEnv("SMTP_PORT", "1025")
 	cfg.SMTP.User = os.Getenv("SMTP_USER")
 	cfg.SMTP.Pass = os.Getenv("SMTP_PASS")
 	cfg.SMTP.From = getEnv("SMTP_FROM", "noreply@namylimsya.local")
-	cfg.SMTP.EmailVerificationEnabled = getBool("EMAIL_VERIFICATION_ENABLED", false)
+	cfg.SMTP.Enabled = getBool("SMTP_ENABLED", false)
 
 	cfg.Storage.Driver = getEnv("STORAGE_DRIVER", "local")
 	cfg.Storage.LocalPath = getEnv("STORAGE_LOCAL_PATH", "./storage")
+	cfg.Storage.PublicBaseURL = getEnv("STORAGE_PUBLIC_BASE_URL", "http://localhost:"+cfg.HTTPPort)
+
+	// Мягкие предупреждения для прода — ПОСЛЕ инициализации всех полей.
+	// В отличие от validateProdSecrets, не блокируют запуск, но пишут
+	// в лог, чтобы оператор увидел молчаливую деградацию.
+	if cfg.IsProd() {
+		for _, w := range prodWarnings(cfg) {
+			log.Warn().Msg(w)
+		}
+	}
 
 	return cfg, nil
 }
 
 func (c *Config) IsProd() bool { return c.AppEnv == "production" }
+
+// defaultLogLevel — дефолтный уровень zerolog: debug в dev/тестах, info в проде,
+// чтобы в production-логи не попадали SQL-трейсеры и debug-строки.
+func defaultLogLevel(appEnv string) string {
+	if appEnv == "production" {
+		return "info"
+	}
+	return "debug"
+}
 
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
@@ -104,4 +174,33 @@ func getBool(key string, fallback bool) bool {
 		}
 	}
 	return fallback
+}
+
+func validateProdSecrets(cfg *Config) error {
+	if len(cfg.JWT.AccessSecret) < 32 {
+		return fmt.Errorf("JWT_ACCESS_SECRET must be at least 32 chars in production (got %d)", len(cfg.JWT.AccessSecret))
+	}
+	if len(cfg.JWT.RefreshSecret) < 32 {
+		return fmt.Errorf("JWT_REFRESH_SECRET must be at least 32 chars in production (got %d)", len(cfg.JWT.RefreshSecret))
+	}
+	if cfg.JWT.AccessSecret == cfg.JWT.RefreshSecret {
+		return fmt.Errorf("JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must differ")
+	}
+	if cfg.JWT.AccessSecret == "dev_access_secret_change_me" || cfg.JWT.RefreshSecret == "dev_refresh_secret_change_me" {
+		return fmt.Errorf("default JWT secrets are not allowed in production")
+	}
+	return nil
+}
+
+// prodWarnings возвращает список «мягких» предупреждений для прода.
+// Не блокируют запуск (в отличие от validateProdSecrets), но логируются —
+// чтобы оператор увидел молчаливую деградацию.
+func prodWarnings(cfg *Config) []string {
+	var out []string
+
+	if !cfg.SMTP.Enabled {
+		out = append(out, "SMTP_ENABLED=false in production: email-письма (ответы поддержки, дайджест уведомлений) не будут отправляться. Установите SMTP_ENABLED=true, если email-канал нужен.")
+	}
+
+	return out
 }

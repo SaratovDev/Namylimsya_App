@@ -17,7 +17,7 @@ const (
 	RoleKey   ctxKey = "role"
 )
 
-func AuthRequired(tm *auth.TokenManager) func(http.Handler) http.Handler {
+func AuthRequired(tm *auth.TokenManager, sm *auth.SessionManager) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get("Authorization")
@@ -30,6 +30,12 @@ func AuthRequired(tm *auth.TokenManager) func(http.Handler) http.Handler {
 			claims, err := tm.ParseAccessToken(tokenStr)
 			if err != nil {
 				httpx.Error(w, http.StatusUnauthorized, "unauthorized", "invalid token")
+				return
+			}
+
+			// Быстрая проверка: не забанен ли пользователь (Redis-флаг с TTL = access TTL).
+			if sm != nil && sm.IsBanned(r.Context(), claims.UserID) {
+				httpx.Error(w, http.StatusForbidden, "banned", "account is banned")
 				return
 			}
 

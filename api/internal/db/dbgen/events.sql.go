@@ -472,6 +472,10 @@ WHERE (
         )
     ))
 )
+  -- Hidden события скрыты от всех, кроме организатора (админ смотрит через /admin/events).
+  -- Без этого «скрытое модератором» событие после завершения (EventWorker) навсегда
+  -- всплывало в публичном архиве — обход модерации.
+  AND (e.hidden = false OR e.organizer_id = $2)
   -- Те же фильтры, что в ленте.
   AND ($3::text IS NULL OR e.category = ANY(string_to_array($3::text, ',')))
   AND ($4::text IS NULL OR e.city = $4)

@@ -238,3 +238,52 @@ func TestArchiveFilters(t *testing.T) {
 	require.Equal(t, 200, r2.Status)
 	require.Empty(t, r2.Body["events"].([]any))
 }
+
+// Скрытое модератором событие не всплывает в публичном архиве после завершения.
+func TestArchiveHidesHiddenEvent(t *testing.T) {
+	env := newTestEnv(t)
+	defer env.cleanup()
+
+	ctx := context.Background()
+	adminToken, _ := setupAdmin(t, env)
+	orgToken := env.registerAndLogin(t, uniqueEmail("ahid_o"), "ahido_"+shortID())
+	uniqueCity := "Саратов-" + shortID()
+
+	resp := env.srv.do(t, httpReq{
+		method: "POST", path: "/api/v1/events", token: orgToken,
+		body: map[string]any{
+			"title": "Hidden archive", "category": "прогулки",
+			"starts_at": futureTime(24 * time.Hour).Format(time.RFC3339),
+			"city":      uniqueCity, "lat": 51.53, "lng": 46.03,
+		},
+	})
+	require.Equal(t, 201, resp.Status, resp.Raw)
+	eventID := resp.Body["id"].(string)
+
+	// Завершаем (эмуляция EventWorker) и скрываем админом.
+	_, err := env.pgPool.Exec(ctx,
+		`UPDATE events SET starts_at = now() - interval '3 hours', status = 'completed' WHERE id = $1`,
+		eventID)
+	require.NoError(t, err)
+	hide := env.srv.do(t, httpReq{
+		method: "POST", path: "/api/v1/admin/events/" + eventID + "/hide", token: adminToken,
+	})
+	require.Equal(t, 200, hide.Status, hide.Raw)
+
+	// Гость в архиве не видит скрытое.
+	guest := env.srv.do(t, httpReq{
+		method: "GET", path: "/api/v1/events/archive?city=" + url.QueryEscape(uniqueCity),
+	})
+	require.Equal(t, 200, guest.Status, guest.Raw)
+	require.Empty(t, guest.Body["events"].([]any),
+		"скрытое событие не должно быть в публичном архиве")
+
+	// Организатор видит своё скрытое в архиве.
+	owner := env.srv.do(t, httpReq{
+		method: "GET", path: "/api/v1/events/archive?city=" + url.QueryEscape(uniqueCity),
+		token:  orgToken,
+	})
+	require.Equal(t, 200, owner.Status, owner.Raw)
+	require.Len(t, owner.Body["events"].([]any), 1,
+		"организатор видит своё скрытое событие в архиве")
+}

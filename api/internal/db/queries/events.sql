@@ -128,6 +128,10 @@ WHERE (
         )
     ))
 )
+  -- Hidden события скрыты от всех, кроме организатора (админ смотрит через /admin/events).
+  -- Без этого «скрытое модератором» событие после завершения (EventWorker) навсегда
+  -- всплывало в публичном архиве — обход модерации.
+  AND (e.hidden = false OR e.organizer_id = sqlc.narg('viewer_id'))
   -- Те же фильтры, что в ленте.
   AND (sqlc.narg('category')::text IS NULL OR e.category = ANY(string_to_array(sqlc.narg('category')::text, ',')))
   AND (sqlc.narg('city')::text IS NULL OR e.city = sqlc.narg('city'))

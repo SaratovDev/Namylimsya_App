@@ -34,6 +34,11 @@ function getNotificationText(n: Notification): { text: string; href?: string } {
         text: `Событие «${p.event_title ?? "событие"}» отменено`,
         href: p.event_id ? `/events/${p.event_id}` : undefined,
       };
+    case "event_updated":
+      return {
+        text: `Событие «${p.event_title ?? "событие"}» изменено`,
+        href: p.event_id ? `/events/${p.event_id}` : undefined,
+      };
     case "application_cancelled":
       return {
         text: "Участник отменил заявку",

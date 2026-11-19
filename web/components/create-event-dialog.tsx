@@ -19,8 +19,24 @@ import { MapPicker } from "@/components/map-picker";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { CATEGORIES } from "@/lib/categories";
+import type { Event } from "@/lib/types";
 
-export function CreateEventDialog({ children }: { children: React.ReactNode }) {
+// ISO (UTC) → значение для <input type="datetime-local"> в локальной TZ.
+function toLocalInput(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+type EventFormDialogProps = {
+  event?: Event;
+  onSaved?: () => void;
+  triggerClassName?: string;
+  children: React.ReactNode;
+};
+
+function EventFormDialog({ event, onSaved, triggerClassName, children }: EventFormDialogProps) {
+  const isEdit = !!event;
   const router = useRouter();
   const { accessToken } = useAuth();
   const [open, setOpen] = useState(false);
@@ -42,23 +58,42 @@ export function CreateEventDialog({ children }: { children: React.ReactNode }) {
 
   const hasLocation = lat !== 0 && lng !== 0 && city !== "";
 
-  const reset = () => {
-    setTitle("");
-    setCategory(CATEGORIES[0].slug);
-    setDescription("");
-    setStartsAt("");
-    setLimit("");
-    setHideExact(false);
-    setLat(0);
-    setLng(0);
-    setCity("");
-    setAddress("");
-  };
+  // При открытии заполняем (edit) или сбрасываем (create) форму —
+  // корректировка состояния при рендере (без setState в effect).
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (prevOpen !== open) {
+    setPrevOpen(open);
+    if (open) {
+      if (event) {
+        setTitle(event.title);
+        setCategory(event.category);
+        setDescription(event.description ?? "");
+        setStartsAt(toLocalInput(event.starts_at));
+        setLimit(event.participant_limit ? String(event.participant_limit) : "");
+        setHideExact(event.hide_exact_location);
+        setLat(event.lat);
+        setLng(event.lng);
+        setCity(event.city);
+        setAddress(event.address ?? "");
+      } else {
+        setTitle("");
+        setCategory(CATEGORIES[0].slug);
+        setDescription("");
+        setStartsAt("");
+        setLimit("");
+        setHideExact(false);
+        setLat(0);
+        setLng(0);
+        setCity("");
+        setAddress("");
+      }
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!accessToken) {
-      toast.error("Войдите, чтобы создать событие");
+      toast.error(isEdit ? "Войдите, чтобы изменить событие" : "Войдите, чтобы создать событие");
       return;
     }
     if (!hasLocation) {
@@ -68,12 +103,11 @@ export function CreateEventDialog({ children }: { children: React.ReactNode }) {
 
     setLoading(true);
     try {
-      const isoDate = new Date(startsAt).toISOString();
       const payload = {
         title,
         category,
         description,
-        starts_at: isoDate,
+        starts_at: new Date(startsAt).toISOString(),
         city,
         address,
         lat,
@@ -81,42 +115,49 @@ export function CreateEventDialog({ children }: { children: React.ReactNode }) {
         hide_exact_location: hideExact,
         participant_limit: limit ? parseInt(limit, 10) : undefined,
       };
-      await apiFetch(
-        "/events",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        },
-        accessToken
-      );
-      toast.success("Событие создано!");
+      if (event) {
+        await apiFetch(
+          `/events/${event.id}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          },
+          accessToken
+        );
+        toast.success("Событие обновлено");
+        onSaved?.();
+      } else {
+        await apiFetch(
+          "/events",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          },
+          accessToken
+        );
+        toast.success("Событие создано!");
+        router.refresh();
+      }
       setOpen(false);
-      reset();
-      router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Ошибка создания");
+      toast.error(err instanceof Error ? err.message : isEdit ? "Ошибка обновления" : "Ошибка создания");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(v) => {
-        setOpen(v);
-        if (!v) reset();
-      }}
-    >
-      <DialogTrigger className={buttonVariants({ className: "gap-2" })}>
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger className={triggerClassName ?? buttonVariants({ className: "gap-2" })}>
         {children}
       </DialogTrigger>
 
       <DialogContent className="md:max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogDescription className="sr-only">
-            Заполните форму и укажите место на карте.
+            {isEdit ? "Измените поля события." : "Заполните форму и укажите место на карте."}
           </DialogDescription>
         </DialogHeader>
 
@@ -272,10 +313,10 @@ export function CreateEventDialog({ children }: { children: React.ReactNode }) {
                   {loading ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Создание…
+                      {isEdit ? "Сохранение…" : "Создание…"}
                     </>
                   ) : (
-                    "Создать событие"
+                    isEdit ? "Сохранить изменения" : "Создать событие"
                   )}
                 </Button>
               </div>
@@ -284,5 +325,29 @@ export function CreateEventDialog({ children }: { children: React.ReactNode }) {
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+export function CreateEventDialog({ children }: { children: React.ReactNode }) {
+  return <EventFormDialog>{children}</EventFormDialog>;
+}
+
+export function EditEventDialog({
+  event,
+  onSaved,
+  children,
+}: {
+  event: Event;
+  onSaved?: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <EventFormDialog
+      event={event}
+      onSaved={onSaved}
+      triggerClassName={buttonVariants({ variant: "outline", size: "sm", className: "gap-2" })}
+    >
+      {children}
+    </EventFormDialog>
   );
 }

@@ -223,7 +223,55 @@ func (s *EventService) Update(ctx context.Context, input UpdateEventInput) (*dbg
 	if err != nil {
 		return nil, fmt.Errorf("update event: %w", err)
 	}
+
+	// Уведомляем approved-участников, если сменились время или место —
+	// иначе они придут не туда и не тогда (см. Cancel — тот же паттерн).
+	if s.notif != nil && locationOrTimeChanged(current, input) {
+		apps, listErr := s.db.ListApprovedForEvent(ctx, input.ID)
+		if listErr != nil {
+			log.Warn().Err(listErr).Str("event_id", input.ID.String()).
+				Msg("list approved participants for update notify")
+		} else {
+			for _, app := range apps {
+				payload := map[string]any{
+					"event_id":    input.ID,
+					"event_title": updated.Title,
+				}
+				if _, nErr := s.notif.Create(ctx, CreateInput{
+					UserID:    app.UserID,
+					Type:      "event_updated",
+					Payload:   payload,
+					SendEmail: true,
+				}); nErr != nil {
+					log.Warn().Err(nErr).
+						Str("event_id", input.ID.String()).
+						Str("application_id", app.ID.String()).
+						Msg("failed to notify event update")
+				}
+			}
+		}
+	}
+
 	return &updated, nil
+}
+
+// locationOrTimeChanged — true, если в Update сменились время или место
+// (тогда одобренным участникам нужно уведомление).
+func locationOrTimeChanged(current dbgen.GetEventByIDRow, input UpdateEventInput) bool {
+	if !current.StartsAt.Equal(input.StartsAt) {
+		return true
+	}
+	if current.Lat.Float64 != input.Lat || current.Lng.Float64 != input.Lng {
+		return true
+	}
+	if current.City != input.City {
+		return true
+	}
+	curAddr := ""
+	if current.Address != nil {
+		curAddr = *current.Address
+	}
+	return curAddr != input.Address
 }
 
 type FeedFilters struct {

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, Calendar, ChevronLeft, Users, X, Loader2 } from "lucide-react";
+import { MapPin, Calendar, ChevronLeft, Users, X, Loader2, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -18,6 +18,7 @@ import { getUserIdFromToken } from "@/lib/jwt";
 import { apiFetch } from "@/lib/api";
 import { CancelDialog } from "./cancel-dialog";
 import { ParticipantsList } from "./participants-list";
+import { EditEventDialog } from "./create-event-dialog";
 import Link from "next/link";
 
 type EventDetailData = Event & {
@@ -171,20 +172,26 @@ export function EventDetail({ event, onRefresh }: Props) {
   {!isInactive && (
     <div className="flex flex-wrap gap-2 shrink-0">
       {isOrganizer ? (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setCancelEventDialogOpen(true)}
-          disabled={cancellingEvent}
-          className="text-destructive hover:text-destructive"
-        >
-          {cancellingEvent ? (
-            <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-          ) : (
-            <X className="h-4 w-4 mr-1" />
-          )}
-          Отменить событие
-        </Button>
+        <>
+          <EditEventDialog event={event} onSaved={onRefresh}>
+            <Pencil className="h-4 w-4 mr-1" />
+            Изменить
+          </EditEventDialog>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCancelEventDialogOpen(true)}
+            disabled={cancellingEvent}
+            className="text-destructive hover:text-destructive"
+          >
+            {cancellingEvent ? (
+              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+            ) : (
+              <X className="h-4 w-4 mr-1" />
+            )}
+            Отменить событие
+          </Button>
+        </>
       ) : appStatus === "pending" || appStatus === "approved" ? (
         <Button
           variant="outline"

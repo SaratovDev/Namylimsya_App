@@ -24,6 +24,7 @@ export function NotificationBell() {
       case "application_approved": return `Ваша заявка одобрена!`;
       case "application_rejected": return `Заявка отклонена`;
       case "event_cancelled": return `Событие «${n.payload.event_title}» отменено`;
+      case "event_updated": return `Событие «${n.payload.event_title ?? "событие"}» изменено`;
       case "application_cancelled": return `Участник отменил заявку`;
       default: return "Новое уведомление";
     }

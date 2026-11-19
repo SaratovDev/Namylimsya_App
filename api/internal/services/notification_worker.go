@@ -151,6 +151,9 @@ func renderEmailBody(items []emailItem, baseURL string) string {
 			body += "<li>Ваша заявка отклонена</li>"
 		case "event_cancelled":
 			body += "<li>Событие отменено</li>"
+		case "event_updated":
+			title, _ := it.Payload["event_title"].(string)
+			body += "<li>Событие «" + html.EscapeString(title) + "» изменено — проверьте время и место</li>"
 		case "application_cancelled":
 			body += "<li>Участник снял заявку</li>"
 		}

@@ -31,6 +31,10 @@ type NotificationWorker struct {
 	baseURL string
 }
 
+// maxEmailAttempts — сколько раз retry одно письмо в flush() перед тем,
+// как признать его потерянным.
+const maxEmailAttempts = 3
+
 func NewNotificationWorker(db *dbgen.Queries, mailer *email.Sender, baseURL string) *NotificationWorker {
 	return &NotificationWorker{
 		db:      db,
@@ -101,12 +105,32 @@ func (w *NotificationWorker) flush(ctx context.Context, batch map[uuid.UUID]*que
 		if q.email == "" {
 			continue
 		}
-		if err := w.mailer.Send(ctx, email.Message{
+		msg := email.Message{
 			To:      q.email,
 			Subject: "Намылимся: новые уведомления",
 			Body:    renderEmailBody(q.items, w.baseURL),
-		}); err != nil {
-			log.Printf("send email to %s: %v", q.email, err)
+		}
+
+		// Retry: до 3 попыток с экспоненциальным backoff — SMTP часто мигает,
+		// а терять письмо из-за одной ошибки нельзя (сброс пароля, дайджесты).
+		var sendErr error
+	retryLoop:
+		for attempt := 0; attempt < maxEmailAttempts; attempt++ {
+			if attempt > 0 {
+				select {
+				case <-ctx.Done():
+					log.Printf("send email to %s: ctx cancelled before retry %d", q.email, attempt+1)
+					break retryLoop
+				case <-time.After(time.Duration(attempt) * 2 * time.Second):
+				}
+			}
+			if sendErr = w.mailer.Send(ctx, msg); sendErr == nil {
+				break retryLoop
+			}
+			log.Printf("send email to %s (attempt %d/%d): %v", q.email, attempt+1, maxEmailAttempts, sendErr)
+		}
+		if sendErr != nil {
+			log.Printf("send email to %s: failed after %d attempts: %v", q.email, maxEmailAttempts, sendErr)
 		}
 	}
 }

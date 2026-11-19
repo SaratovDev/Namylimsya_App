@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
-	"github.com/rs/zerolog/log"
 )
 
 type Config struct {
@@ -128,12 +127,13 @@ func Load() (*Config, error) {
 	cfg.Storage.LocalPath = getEnv("STORAGE_LOCAL_PATH", "./storage")
 	cfg.Storage.PublicBaseURL = getEnv("STORAGE_PUBLIC_BASE_URL", "http://localhost:"+cfg.HTTPPort)
 
-	// Мягкие предупреждения для прода — ПОСЛЕ инициализации всех полей.
-	// В отличие от validateProdSecrets, не блокируют запуск, но пишут
-	// в лог, чтобы оператор увидел молчаливую деградацию.
+	// Проверки прода — ПОСЛЕ инициализации всех полей (SMTP, storage).
+	// SMTP обязателен в проде: иначе сброс пароля и дайджесты молча не работают —
+	// отключённый отправитель возвращает nil как «успех» (см. email.Sender),
+	// а UI при этом говорит «отправлено».
 	if cfg.IsProd() {
-		for _, w := range prodWarnings(cfg) {
-			log.Warn().Msg(w)
+		if err := validateProdSMTP(cfg); err != nil {
+			return nil, err
 		}
 	}
 
@@ -192,15 +192,11 @@ func validateProdSecrets(cfg *Config) error {
 	return nil
 }
 
-// prodWarnings возвращает список «мягких» предупреждений для прода.
-// Не блокируют запуск (в отличие от validateProdSecrets), но логируются —
-// чтобы оператор увидел молчаливую деградацию.
-func prodWarnings(cfg *Config) []string {
-	var out []string
-
+// validateProdSMTP — SMTP обязателен в production. Без него сброс пароля и
+// email-дайджесты молча не работают (отключённый отправитель возвращает nil).
+func validateProdSMTP(cfg *Config) error {
 	if !cfg.SMTP.Enabled {
-		out = append(out, "SMTP_ENABLED=false in production: email-письма (ответы поддержки, дайджест уведомлений) не будут отправляться. Установите SMTP_ENABLED=true, если email-канал нужен.")
+		return fmt.Errorf("SMTP_ENABLED must be true in production (password reset and notification emails require it)")
 	}
-
-	return out
+	return nil
 }

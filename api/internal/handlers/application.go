@@ -20,6 +20,28 @@ func NewApplicationHandler(svc *services.ApplicationService) *ApplicationHandler
 	return &ApplicationHandler{svc: svc}
 }
 
+// mapAppErr — единая маппинг ошибок заявок:
+//   - ErrNotApplicationOwner → 403;
+//   - известные доменные ошибки → 400 с текстом (это про ввод);
+//   - всё остальное (БД упала и т.п.) → 500 generic, без утечки err.Error().
+func mapAppErr(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, services.ErrNotApplicationOwner):
+		httpx.Error(w, http.StatusForbidden, "forbidden", err.Error())
+	case errors.Is(err, services.ErrCannotApplyToOwnEvent),
+		errors.Is(err, services.ErrApplicationExists),
+		errors.Is(err, services.ErrTooManyApplications),
+		errors.Is(err, services.ErrEventFull),
+		errors.Is(err, services.ErrEventNotActive),
+		errors.Is(err, services.ErrEventHidden),
+		errors.Is(err, services.ErrEventInPast),
+		errors.Is(err, services.ErrEventNotFound):
+		httpx.Error(w, http.StatusBadRequest, "bad_request", err.Error())
+	default:
+		httpx.InternalError(w, err)
+	}
+}
+
 func (h *ApplicationHandler) Apply(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.GetUserID(r.Context())
 	if !ok {
@@ -35,7 +57,7 @@ func (h *ApplicationHandler) Apply(w http.ResponseWriter, r *http.Request) {
 
 	app, err := h.svc.Apply(r.Context(), eventID, userID)
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "bad_request", err.Error())
+		mapAppErr(w, err)
 		return
 	}
 
@@ -57,11 +79,7 @@ func (h *ApplicationHandler) Approve(w http.ResponseWriter, r *http.Request) {
 
 	app, err := h.svc.Approve(r.Context(), appID, userID)
 	if err != nil {
-		if errors.Is(err, services.ErrNotApplicationOwner) {
-			httpx.Error(w, http.StatusForbidden, "forbidden", err.Error())
-			return
-		}
-		httpx.Error(w, http.StatusBadRequest, "bad_request", err.Error())
+		mapAppErr(w, err)
 		return
 	}
 
@@ -83,11 +101,7 @@ func (h *ApplicationHandler) Reject(w http.ResponseWriter, r *http.Request) {
 
 	app, err := h.svc.Reject(r.Context(), appID, userID)
 	if err != nil {
-		if errors.Is(err, services.ErrNotApplicationOwner) {
-			httpx.Error(w, http.StatusForbidden, "forbidden", err.Error())
-			return
-		}
-		httpx.Error(w, http.StatusBadRequest, "bad_request", err.Error())
+		mapAppErr(w, err)
 		return
 	}
 
@@ -116,11 +130,7 @@ func (h *ApplicationHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 
 	app, err := h.svc.Cancel(r.Context(), appID, userID, req.Reason)
 	if err != nil {
-		if errors.Is(err, services.ErrNotApplicationOwner) {
-			httpx.Error(w, http.StatusForbidden, "forbidden", err.Error())
-			return
-		}
-		httpx.Error(w, http.StatusBadRequest, "bad_request", err.Error())
+		mapAppErr(w, err)
 		return
 	}
 
@@ -142,11 +152,7 @@ func (h *ApplicationHandler) ListForEvent(w http.ResponseWriter, r *http.Request
 
 	apps, err := h.svc.ListForEvent(r.Context(), eventID, userID)
 	if err != nil {
-		if errors.Is(err, services.ErrNotApplicationOwner) {
-			httpx.Error(w, http.StatusForbidden, "forbidden", err.Error())
-			return
-		}
-		httpx.Error(w, http.StatusBadRequest, "bad_request", err.Error())
+		mapAppErr(w, err)
 		return
 	}
 

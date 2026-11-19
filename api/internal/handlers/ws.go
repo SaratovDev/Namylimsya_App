@@ -42,6 +42,20 @@ const (
 	wsCloseForbidden    = 4403
 )
 
+// wsChatErrorText — текст ошибки чата для WS-клиента: без утечки err.Error()
+// от драйвера БД. Доменные ошибки (пустое/длинное сообщение) отдаём как есть.
+func wsChatErrorText(err error) string {
+	switch {
+	case errors.Is(err, services.ErrNotChatMember):
+		return "you are not a member of this chat"
+	case errors.Is(err, services.ErrMessageEmpty),
+		errors.Is(err, services.ErrMessageTooLong):
+		return err.Error()
+	default:
+		return "internal error"
+	}
+}
+
 type WSHandler struct {
 	hub      *ws.Hub
 	chatSvc  *services.ChatService
@@ -267,7 +281,7 @@ func (h *WSHandler) Handle(w http.ResponseWriter, r *http.Request) {
 				Str("event_id", eventID.String()).
 				Str("user_id", claims.UserID.String()).
 				Msg("ws chat send failed")
-			errMsg, _ := json.Marshal(map[string]string{"error": err.Error()})
+			errMsg, _ := json.Marshal(map[string]string{"error": wsChatErrorText(err)})
 			client.Enqueue(errMsg)
 			continue
 		}

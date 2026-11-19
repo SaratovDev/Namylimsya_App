@@ -341,8 +341,11 @@ func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 			httpx.Error(w, http.StatusBadRequest, "bad_request", "Неверный или истёкший код")
 		case errors.Is(err, services.ErrTooManyAttempts):
 			httpx.Error(w, http.StatusTooManyRequests, "rate_limit", "Слишком много попыток. Подождите 15 минут.")
-		default:
+		case errors.Is(err, services.ErrPasswordTooShort),
+			errors.Is(err, services.ErrPasswordTooLong):
 			httpx.Error(w, http.StatusBadRequest, "bad_request", err.Error())
+		default:
+			httpx.InternalError(w, err)
 		}
 		return
 	}

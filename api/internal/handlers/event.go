@@ -314,7 +314,21 @@ func (h *EventHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Role:              role,
 	})
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "bad_request", err.Error())
+		switch {
+		case errors.Is(err, services.ErrTooManyActiveEvents),
+			errors.Is(err, services.ErrEventInPast),
+			errors.Is(err, services.ErrInvalidParticipantLimit),
+			errors.Is(err, services.ErrTitleRequired),
+			errors.Is(err, services.ErrTitleTooLong),
+			errors.Is(err, services.ErrDescriptionTooLong),
+			errors.Is(err, services.ErrInvalidCategory),
+			errors.Is(err, services.ErrInvalidLatitude),
+			errors.Is(err, services.ErrInvalidLongitude),
+			errors.Is(err, services.ErrCoordinatesMissing):
+			httpx.Error(w, http.StatusBadRequest, "bad_request", err.Error())
+		default:
+			httpx.InternalError(w, err)
+		}
 		return
 	}
 

@@ -30,6 +30,8 @@ var (
 	// Password reset:
 	ErrInvalidResetCode = errors.New("Неверный или истёкший код")
 	ErrTooManyAttempts  = errors.New("Слишком много попыток. Подождите 15 минут.")
+	ErrPasswordTooShort = errors.New("Пароль должен быть не короче 8 символов")
+	ErrPasswordTooLong  = errors.New("Пароль слишком длинный (макс. 72 символа)")
 
 	// Email verification:
 	ErrInvalidVerificationToken = errors.New("Неверная или истёкшая ссылка подтверждения")
@@ -97,10 +99,10 @@ func (s *AuthService) ResetPassword(ctx context.Context, emailAddr, code, newPas
 	emailAddr = strings.ToLower(strings.TrimSpace(emailAddr))
 
 	if len(newPassword) < 8 {
-		return errors.New("Пароль должен быть не короче 8 символов")
+		return ErrPasswordTooShort
 	}
 	if len(newPassword) > 72 {
-		return errors.New("Пароль слишком длинный (макс. 72 символа)")
+		return ErrPasswordTooLong
 	}
 
 	attemptsKey := fmt.Sprintf("pwreset:attempts:%s", emailAddr)

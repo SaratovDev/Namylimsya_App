@@ -14,7 +14,8 @@ func TestParticipantsApprovedOnly(t *testing.T) {
 	defer env.cleanup()
 
 	orgToken := env.registerAndLogin(t, uniqueEmail("po_org"), "poo_"+shortID())
-	u1Token := env.registerAndLogin(t, uniqueEmail("po_u1"), "pou1_"+shortID())
+	u1Email := uniqueEmail("po_u1")
+	u1Token := env.registerAndLogin(t, u1Email, "pou1_"+shortID())
 	u2Token := env.registerAndLogin(t, uniqueEmail("po_u2"), "pou2_"+shortID())
 	u3Token := env.registerAndLogin(t, uniqueEmail("po_u3"), "pou3_"+shortID())
 
@@ -61,7 +62,12 @@ func TestParticipantsApprovedOnly(t *testing.T) {
 	require.Equal(t, 200, resp.Status, resp.Raw)
 	parts := resp.Body["participants"].([]any)
 	require.Len(t, parts, 1, "только approved (u1), pending и rejected скрыты")
-	require.Equal(t, "po_u1", parts[0].(map[string]any)["username"])
+
+	// registerAndLogin дополняет username UUID-хвостом, поэтому сверяем с
+	// фактическим значением из БД по email, а не с литералом.
+	u1User, err := env.queries.GetUserByEmail(context.Background(), u1Email)
+	require.NoError(t, err)
+	require.Equal(t, u1User.Username, parts[0].(map[string]any)["username"])
 }
 
 // Публичный эндпоинт без авторизации.
